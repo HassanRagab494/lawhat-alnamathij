@@ -1,0 +1,25 @@
+import 'reflect-metadata';
+import { Logger } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module';
+import { configureApp, mountOpenApi } from './bootstrap';
+import { EnvValidationError, loadEnv } from './config/env';
+
+async function main(): Promise<void> {
+  const env = loadEnv();
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  configureApp(app, env);
+  mountOpenApi(app, env);
+  await app.listen(env.API_PORT);
+  Logger.log(`API تعمل على http://localhost:${env.API_PORT}/api — التوثيق: /api/docs`, 'Bootstrap');
+}
+
+main().catch((error: unknown) => {
+  if (error instanceof EnvValidationError) {
+    console.error(error.message);
+  } else {
+    console.error(error);
+  }
+  process.exit(1);
+});

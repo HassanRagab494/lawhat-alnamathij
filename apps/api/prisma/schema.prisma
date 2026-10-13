@@ -1,0 +1,151 @@
+// مخطط المرحلة الأولى فقط: المستخدمون، الصلاحيات، الجلسات، النماذج، مسودات الإصدارات، سجل العمليات.
+// جميع الأوقات تُخزَّن بتوقيت UTC (DATETIME(3)).
+// المعرّفات UUIDv7: غير متسلسلة الدلالة للمستخدم الخارجي ومرتبة زمنيًا لصالح الفهارس.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  SUPERVISOR
+}
+
+/// صلاحيات المشرفين. تُضاف صلاحيات مراجعة الردود والتصدير لاحقًا بـ migration تضيف قيمًا جديدة.
+enum Permission {
+  FORMS_VIEW
+  FORMS_CREATE
+  FORMS_EDIT
+  FORMS_ARCHIVE
+}
+
+model User {
+  id                String    @id @default(uuid(7)) @db.Char(36)
+  /// يُخزَّن بأحرف صغيرة بعد التطبيع، وهو فريد.
+  username          String    @unique @db.VarChar(32)
+  displayName       String    @map("display_name") @db.VarChar(100)
+  passwordHash      String    @map("password_hash") @db.VarChar(255)
+  role              UserRole
+  isActive          Boolean   @default(true) @map("is_active")
+  failedLoginCount  Int       @default(0) @map("failed_login_count")
+  lockedUntil       DateTime? @map("locked_until") @db.DateTime(3)
+  lastLoginAt       DateTime? @map("last_login_at") @db.DateTime(3)
+  passwordChangedAt DateTime  @default(now()) @map("password_changed_at") @db.DateTime(3)
+  createdById       String?   @map("created_by_id") @db.Char(36)
+  /// حذف ناعم: الحساب يختفي من القوائم ويُمنع دخوله، ويبقى سجله مرتبطًا بالنماذج وسجل العمليات.
+  deletedAt         DateTime? @map("deleted_at") @db.DateTime(3)
+  deletedById       String?   @map("deleted_by_id") @db.Char(36)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  createdBy          User?            @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers       User[]           @relation("UserCreatedBy")
+  deletedBy          User?            @relation("UserDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedUsers       User[]           @relation("UserDeletedBy")
+  permissions        UserPermission[] @relation("PermissionHolder")
+  grantedPermissions UserPermission[] @relation("PermissionGrantor")
+  sessions           Session[]
+  createdForms       Form[]           @relation("FormCreatedBy")
+  archivedForms      Form[]           @relation("FormArchivedBy")
+  draftUpdates       FormDraft[]      @relation("DraftUpdatedBy")
+  auditLogs          AuditLog[]
+
+  @@index([role, isActive])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model UserPermission {
+  userId      String     @map("user_id") @db.Char(36)
+  permission  Permission
+  grantedById String?    @map("granted_by_id") @db.Char(36)
+  grantedAt   DateTime   @default(now()) @map("granted_at") @db.DateTime(3)
+
+  user      User  @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("PermissionGrantor", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@id([userId, permission])
+  @@map("user_permissions")
+}
+
+/// جلسة قابلة للإلغاء. لا يُخزَّن الرمز نفسه؛ فقط تجزئة SHA-256 له ولرمز CSRF.
+model Session {
+  id            String    @id @default(uuid(7)) @db.Char(36)
+  tokenHash     String    @unique @map("token_hash") @db.Char(64)
+  csrfTokenHash String    @map("csrf_token_hash") @db.Char(64)
+  userId        String    @map("user_id") @db.Char(36)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.DateTime(3)
+  expiresAt     DateTime  @map("expires_at") @db.DateTime(3)
+  revokedAt     DateTime? @map("revoked_at") @db.DateTime(3)
+  /// logout | password_changed | password_reset | user_deactivated
+  revokedReason String?   @map("revoked_reason") @db.VarChar(32)
+  ipAddress     String?   @map("ip_address") @db.VarChar(45)
+  userAgent     String?   @map("user_agent") @db.VarChar(255)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// السجل المستقل للنموذج. لا يحمل محتوى؛ المحتوى القابل للتعديل في FormDraft،
+/// والإصدارات المنشورة الثابتة ستُضاف لاحقًا كجدول مستقل مرتبط بـ Form.
+model Form {
+  id           String    @id @default(uuid(7)) @db.Char(36)
+  createdById  String    @map("created_by_id") @db.Char(36)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  archivedAt   DateTime? @map("archived_at") @db.DateTime(3)
+  archivedById String?   @map("archived_by_id") @db.Char(36)
+
+  createdBy  User       @relation("FormCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  archivedBy User?      @relation("FormArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  draft      FormDraft?
+
+  @@index([archivedAt, updatedAt])
+  @@map("forms")
+}
+
+/// مسودة الإصدار الحالية للنموذج (واحدة لكل نموذج). revision يزيد مع كل حفظ لمنع الكتابة فوق تعديل متزامن.
+model FormDraft {
+  id          String   @id @default(uuid(7)) @db.Char(36)
+  formId      String   @unique @map("form_id") @db.Char(36)
+  title       String   @db.VarChar(200)
+  description String?  @db.Text
+  revision    Int      @default(1)
+  updatedById String   @map("updated_by_id") @db.Char(36)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  form      Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  updatedBy User @relation("DraftUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([title])
+  @@map("form_drafts")
+}
+
+/// سجل العمليات الإدارية. لا يُخزَّن فيه أي كلمة مرور أو رمز جلسة.
+model AuditLog {
+  id         String   @id @default(uuid(7)) @db.Char(36)
+  actorId    String?  @map("actor_id") @db.Char(36)
+  action     String   @db.VarChar(64)
+  entityType String   @map("entity_type") @db.VarChar(32)
+  entityId   String?  @map("entity_id") @db.Char(36)
+  details    Json?
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

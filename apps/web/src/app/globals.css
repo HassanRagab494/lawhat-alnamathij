@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+@theme {
+  /* أبيض دخاني */
+  --color-smoke-50: #fafaf8;
+  --color-smoke-100: #f4f4f1;
+  --color-smoke-200: #e8e8e3;
+  --color-smoke-300: #d6d6cf;
+  /* أزرق عميق قريب من القطيفة */
+  --color-velvet-50: #eff1fa;
+  --color-velvet-100: #dfe3f4;
+  --color-velvet-200: #bec6e8;
+  --color-velvet-300: #8f9cd3;
+  --color-velvet-500: #3a4ea8;
+  --color-velvet-600: #2b3c94;
+  --color-velvet-700: #22307a;
+  --color-velvet-800: #1b2662;
+  --color-velvet-900: #141c4a;
+  --color-ink: #1d2233;
+  --color-muted: #535a6e;
+
+  --font-sans:
+    'Segoe UI', 'Noto Sans Arabic', 'Geeza Pro', Tahoma, system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html {
+    color: var(--color-ink);
+    background-color: var(--color-smoke-100);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    /* خلفية هادئة تكفي لإظهار التأثير الزجاجي دون التأثير على وضوح النص */
+    background:
+      radial-gradient(60rem 30rem at 100% -10%, rgb(43 60 148 / 0.1), transparent 70%),
+      radial-gradient(40rem 24rem at -10% 110%, rgb(43 60 148 / 0.07), transparent 70%),
+      var(--color-smoke-100);
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-velvet-500);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
+
+  dialog::backdrop {
+    background: rgb(20 28 74 / 0.35);
+    backdrop-filter: blur(2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility glass {
+  background-color: rgb(255 255 255 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.85);
+  box-shadow:
+    0 1px 2px rgb(20 28 74 / 0.06),
+    0 8px 24px -12px rgb(20 28 74 / 0.18);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
