@@ -27,6 +27,9 @@ function storedForm(overrides: { revision?: number; archivedAt?: Date | null } =
     updatedAt: new Date('2026-10-01T00:00:00Z'),
     archivedAt: overrides.archivedAt ?? null,
     archivedById: null,
+    publicId: null,
+    acceptingResponses: false,
+    versions: [],
     createdBy: { id: 'u', displayName: 'المدير' },
     draft: {
       id: 'd1',

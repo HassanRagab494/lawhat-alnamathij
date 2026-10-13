@@ -1,0 +1,14 @@
+# لا تدخل الأسرار ولا ملفات البناء المحلية في سياق Docker.
+.git
+.tmp
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+.env
+.env.*
+!.env.example
+docker
+docs

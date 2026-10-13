@@ -45,6 +45,18 @@ export const QUESTION_LIMITS = {
  */
 export const DRAFT_REQUEST_MAX_BYTES = 4 * 1024 * 1024;
 
+/**
+ * حدود الردود العامة (المرحلة الثالثة)، مستقلة عن حد طلب المسودة.
+ *
+ * RESPONSE_REQUEST_MAX_BYTES حد إجمالي مستقل لحجم طلب إرسال الرد (512 KiB). يكفي لنموذج عادي بهامش كبير
+ * (100 سؤال بإجابات قصيرة عربية أقل من 150 KiB)، لكنه لا يغطي كل تركيبة تسمح بها حدود الأسئلة: مثلًا
+ * 100 فقرة طول كل منها 10000 حرف عربي (≈ 2 MiB) تُرفض بـ 413 مع بقاء الإجابات في الصفحة. هذا اختيار
+ * مقصود لمسار عام بلا تسجيل دخول، ويُراجع إن احتاجت نماذج فعلية أكثر.
+ */
+export const RESPONSE_REQUEST_MAX_BYTES = 512 * 1024;
+/** أقصى عدد خانات عشرية لإجابة سؤال الرقم (يطابق عمود DECIMAL(23,10)). */
+export const ANSWER_MAX_DECIMALS = 10;
+
 /** أنواع الملفات المسموح باختيارها فقط (قائمة آمنة؛ لا ملفات تنفيذية أو سكربتات). */
 export const FILE_TYPE_KEYS = ['pdf', 'jpg', 'png', 'webp', 'docx', 'xlsx', 'txt'] as const;
 export type FileTypeKey = (typeof FILE_TYPE_KEYS)[number];

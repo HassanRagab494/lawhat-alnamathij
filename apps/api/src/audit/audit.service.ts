@@ -19,6 +19,9 @@ export type AuditAction =
   | 'form.created'
   | 'form.updated'
   | 'form.draft_saved'
+  | 'form.published'
+  | 'form.responses_opened'
+  | 'form.responses_closed'
   | 'form.archived'
   | 'form.restored';
 

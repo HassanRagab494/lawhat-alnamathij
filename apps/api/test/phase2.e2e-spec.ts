@@ -589,11 +589,20 @@ describe('المرحلة الثانية: محرر النموذج', () => {
     expect(after.body.revision).toBe(3);
   }, 120_000);
 
-  it('9) لا توجد جداول ردود ولا يُنشأ أي رد', async () => {
+  it('9) المحرر لا ينشئ ردودًا ولا إصدارات، ولا توجد جداول رفع ملفات', async () => {
+    // جداول الردود أُضيفت في المرحلة الثالثة؛ المطلوب هنا أن الحفظ والمعاينة لا ينشئان أي رد أو إصدار.
     const tables: { t: string }[] = await prisma.$queryRaw`
       SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`;
     const names = tables.map((r) => r.t);
-    expect(names.some((n) => /response|answer|submission|upload|file/i.test(n))).toBe(false);
+    expect(names.some((n) => /submission|upload|file/i.test(n))).toBe(false);
+    const forms = await prisma.form.findMany({
+      where: { createdBy: { username: { startsWith: 'p2.' } } },
+      select: { id: true },
+    });
+    const formIds = forms.map((f) => f.id);
+    expect(formIds.length).toBeGreaterThan(0);
+    expect(await prisma.formResponse.count({ where: { formId: { in: formIds } } })).toBe(0);
+    expect(await prisma.formVersion.count({ where: { formId: { in: formIds } } })).toBe(0);
   });
 });
 

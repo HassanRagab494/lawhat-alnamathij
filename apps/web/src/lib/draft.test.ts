@@ -18,6 +18,12 @@ const server: FormDraft = {
   title: 'نموذج',
   description: null,
   publicationStatus: 'draft',
+  publication: {
+    publicId: null,
+    acceptingResponses: false,
+    latestVersion: null,
+    hasUnpublishedChanges: true,
+  },
   isArchived: false,
   revision: 3,
   createdBy: { id: 'u', displayName: 'مدير' },

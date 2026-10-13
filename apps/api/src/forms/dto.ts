@@ -63,15 +63,33 @@ export class UserRefDto {
   @ApiProperty() displayName!: string;
 }
 
+export class PublishedVersionRefDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() versionNumber!: number;
+  @ApiProperty({ type: String, format: 'date-time' }) publishedAt!: string;
+  @ApiProperty({ type: UserRefDto }) publishedBy!: UserRefDto;
+}
+
+export class FormPublicationDto {
+  @ApiProperty({ type: String, nullable: true, description: 'المعرّف العام للرابط /f/<publicId>' })
+  publicId!: string | null;
+  @ApiProperty() acceptingResponses!: boolean;
+  @ApiProperty({ type: PublishedVersionRefDto, nullable: true })
+  latestVersion!: PublishedVersionRefDto | null;
+  @ApiProperty({ description: 'المسودة الحالية تختلف عن آخر إصدار منشور (أو لا يوجد إصدار)' })
+  hasUnpublishedChanges!: boolean;
+}
+
 export class FormDto {
   @ApiProperty() id!: string;
   @ApiProperty() title!: string;
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty({
-    enum: ['draft'],
-    description: 'حالة النشر. في هذه المرحلة كل النماذج مسودات غير منشورة.',
+    enum: ['draft', 'published'],
+    description: 'draft: لم يُنشر أي إصدار بعد؛ published: يوجد إصدار منشور واحد على الأقل.',
   })
-  publicationStatus!: 'draft';
+  publicationStatus!: 'draft' | 'published';
+  @ApiProperty({ type: () => FormPublicationDto }) publication!: FormPublicationDto;
   @ApiProperty() isArchived!: boolean;
   @ApiProperty({ description: 'رقم مراجعة المسودة الحالية' }) revision!: number;
   @ApiProperty({ type: UserRefDto }) createdBy!: UserRefDto;

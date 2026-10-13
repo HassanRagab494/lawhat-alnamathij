@@ -876,6 +876,232 @@
         ]
       }
     },
+    "/api/forms/{id}/publish": {
+      "post": {
+        "description": "ينسخ العنوان والوصف والأسئلة والخيارات وإعداداتها إلى إصدار جديد رقمه = الأعلى + 1. يتطلب revision المسودة المحفوظة (قديم ⇒ 409 REVISION_CONFLICT مع details.current). يُمنع نشر نموذج بلا أسئلة أو فيه سؤال رفع ملفات أو بيانات غير صحيحة (409 PUBLISH_BLOCKED مع details.reasons). إعادة الطلب بنفس publishKey تعيد الإصدار نفسه (replayed: true). أول نشر يفتح الاستقبال فقط إن أُرسل openResponses: true؛ التحديثات تحافظ على حالة الاستقبال.",
+        "operationId": "FormsController_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishFormDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishResultDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "REVISION_CONFLICT أو PUBLISH_BLOCKED أو FORM_ARCHIVED أو PUBLISH_KEY_REUSED"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "نشر المسودة المحفوظة كإصدار ثابت",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/open": {
+      "post": {
+        "description": "يتطلب نموذجًا غير مؤرشف وله إصدار منشور (409 FORM_ARCHIVED أو NOT_PUBLISHED). الطلب على الحالة نفسها لا يغيّر شيئًا.",
+        "operationId": "FormsController_openResponses",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "فتح استقبال الردود",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/close": {
+      "post": {
+        "description": "بعد اكتماله لا يُقبل أي رد جديد، حتى من صفحات فُتحت قبله (الإرسال والإغلاق يأخذان قفل النموذج نفسه).",
+        "operationId": "FormsController_closeResponses",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "إغلاق استقبال الردود",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/public/forms/{publicId}": {
+      "get": {
+        "description": "يعيد العنوان والوصف والأسئلة فقط. عند إغلاق الاستقبال أو الأرشفة: acceptingResponses=false دون أسئلة. نموذج غير موجود أو غير منشور ⇒ 404.",
+        "operationId": "PublicController_getForm",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicFormDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          }
+        },
+        "summary": "قراءة أحدث إصدار منشور للنموذج العام",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/api/public/forms/{publicId}/responses": {
+      "post": {
+        "description": "يتحقق الخادم من الإجابات وفق الإصدار المنشور ويحفظ الرد كاملًا في معاملة واحدة. 201 لرد جديد؛ إعادة الطلب نفسه بنفس idempotencyKey ⇒ 200 بالرقم المرجعي الأصلي. الحجم حتى 512KB، ومحدود المعدل لكل IP ولكل نموذج.",
+        "operationId": "PublicController_submit",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitResponseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "إعادة طلب محفوظ سابقًا",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "رد جديد",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResultDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "RESPONSES_CLOSED أو VERSION_OUTDATED أو IDEMPOTENCY_KEY_REUSED"
+          },
+          "429": {
+            "description": "TOO_MANY_REQUESTS"
+          }
+        },
+        "summary": "إرسال رد",
+        "tags": [
+          "public"
+        ]
+      }
+    },
     "/api/dashboard/summary": {
       "get": {
         "operationId": "DashboardController_summary",
@@ -998,7 +1224,9 @@
                 "FORMS_VIEW",
                 "FORMS_CREATE",
                 "FORMS_EDIT",
-                "FORMS_ARCHIVE"
+                "FORMS_ARCHIVE",
+                "FORMS_PUBLISH",
+                "FORMS_INTAKE"
               ]
             }
           }
@@ -1076,7 +1304,9 @@
                 "FORMS_VIEW",
                 "FORMS_CREATE",
                 "FORMS_EDIT",
-                "FORMS_ARCHIVE"
+                "FORMS_ARCHIVE",
+                "FORMS_PUBLISH",
+                "FORMS_INTAKE"
               ]
             }
           },
@@ -1156,7 +1386,9 @@
               "FORMS_VIEW",
               "FORMS_CREATE",
               "FORMS_EDIT",
-              "FORMS_ARCHIVE"
+              "FORMS_ARCHIVE",
+              "FORMS_PUBLISH",
+              "FORMS_INTAKE"
             ]
           },
           "label": {
@@ -1168,7 +1400,9 @@
               "FORMS_VIEW",
               "FORMS_CREATE",
               "FORMS_EDIT",
-              "FORMS_ARCHIVE"
+              "FORMS_ARCHIVE",
+              "FORMS_PUBLISH",
+              "FORMS_INTAKE"
             ],
             "nullable": true
           }
@@ -1204,7 +1438,9 @@
                 "FORMS_VIEW",
                 "FORMS_CREATE",
                 "FORMS_EDIT",
-                "FORMS_ARCHIVE"
+                "FORMS_ARCHIVE",
+                "FORMS_PUBLISH",
+                "FORMS_INTAKE"
               ]
             }
           }
@@ -1231,7 +1467,9 @@
                 "FORMS_VIEW",
                 "FORMS_CREATE",
                 "FORMS_EDIT",
-                "FORMS_ARCHIVE"
+                "FORMS_ARCHIVE",
+                "FORMS_PUBLISH",
+                "FORMS_INTAKE"
               ]
             }
           }
@@ -1265,6 +1503,62 @@
           "displayName"
         ]
       },
+      "PublishedVersionRefDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "versionNumber": {
+            "type": "number"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "publishedBy": {
+            "$ref": "#/components/schemas/UserRefDto"
+          }
+        },
+        "required": [
+          "id",
+          "versionNumber",
+          "publishedAt",
+          "publishedBy"
+        ]
+      },
+      "FormPublicationDto": {
+        "type": "object",
+        "properties": {
+          "publicId": {
+            "type": "string",
+            "nullable": true,
+            "description": "المعرّف العام للرابط /f/<publicId>"
+          },
+          "acceptingResponses": {
+            "type": "boolean"
+          },
+          "latestVersion": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PublishedVersionRefDto"
+              }
+            ]
+          },
+          "hasUnpublishedChanges": {
+            "type": "boolean",
+            "description": "المسودة الحالية تختلف عن آخر إصدار منشور (أو لا يوجد إصدار)"
+          }
+        },
+        "required": [
+          "publicId",
+          "acceptingResponses",
+          "latestVersion",
+          "hasUnpublishedChanges"
+        ]
+      },
       "FormDto": {
         "type": "object",
         "properties": {
@@ -1281,9 +1575,13 @@
           "publicationStatus": {
             "type": "string",
             "enum": [
-              "draft"
+              "draft",
+              "published"
             ],
-            "description": "حالة النشر. في هذه المرحلة كل النماذج مسودات غير منشورة."
+            "description": "draft: لم يُنشر أي إصدار بعد؛ published: يوجد إصدار منشور واحد على الأقل."
+          },
+          "publication": {
+            "$ref": "#/components/schemas/FormPublicationDto"
           },
           "isArchived": {
             "type": "boolean"
@@ -1314,6 +1612,7 @@
           "title",
           "description",
           "publicationStatus",
+          "publication",
           "isArchived",
           "revision",
           "createdBy",
@@ -1469,9 +1768,13 @@
           "publicationStatus": {
             "type": "string",
             "enum": [
-              "draft"
+              "draft",
+              "published"
             ],
-            "description": "حالة النشر. في هذه المرحلة كل النماذج مسودات غير منشورة."
+            "description": "draft: لم يُنشر أي إصدار بعد؛ published: يوجد إصدار منشور واحد على الأقل."
+          },
+          "publication": {
+            "$ref": "#/components/schemas/FormPublicationDto"
           },
           "isArchived": {
             "type": "boolean"
@@ -1509,6 +1812,7 @@
           "title",
           "description",
           "publicationStatus",
+          "publication",
           "isArchived",
           "revision",
           "createdBy",
@@ -1616,6 +1920,251 @@
           "revision",
           "title",
           "questions"
+        ]
+      },
+      "PublishFormDto": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "number",
+            "minimum": 1,
+            "description": "revision المسودة المحفوظة التي راجعها المستخدم؛ إن تغيّرت ⇒ 409 دون نشر"
+          },
+          "publishKey": {
+            "type": "string",
+            "format": "uuid",
+            "description": "مفتاح إعادة محاولة يولّده العميل لكل نافذة نشر؛ إعادة الطلب به تعيد الإصدار نفسه"
+          },
+          "openResponses": {
+            "type": "boolean",
+            "description": "في أول نشر فقط: فتح استقبال الردود مباشرة. يُتجاهل في التحديثات اللاحقة."
+          }
+        },
+        "required": [
+          "revision",
+          "publishKey"
+        ]
+      },
+      "PublishedVersionSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "versionNumber": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "versionNumber"
+        ]
+      },
+      "PublishResultDto": {
+        "type": "object",
+        "properties": {
+          "form": {
+            "$ref": "#/components/schemas/FormDto"
+          },
+          "version": {
+            "$ref": "#/components/schemas/PublishedVersionSummaryDto"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "true إن كان الطلب إعادة لنشر سابق بنفس المفتاح"
+          }
+        },
+        "required": [
+          "form",
+          "version",
+          "replayed"
+        ]
+      },
+      "PublicOptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "معرّف الخيار داخل هذا الإصدار (يُرسل في الإجابة)"
+          },
+          "key": {
+            "type": "string",
+            "description": "مفتاح منطقي ثابت عبر الإصدارات (لنقل الإجابات عند التحديث)"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label"
+        ]
+      },
+      "PublicQuestionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "معرّف السؤال داخل هذا الإصدار (يُرسل في الإجابة)"
+          },
+          "key": {
+            "type": "string",
+            "description": "مفتاح منطقي ثابت عبر الإصدارات"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SHORT_TEXT",
+              "PARAGRAPH",
+              "SINGLE_CHOICE",
+              "MULTIPLE_CHOICE",
+              "DROPDOWN",
+              "NUMBER",
+              "DATE",
+              "FILE_UPLOAD"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicOptionDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "type",
+          "title",
+          "description",
+          "required",
+          "settings",
+          "options"
+        ]
+      },
+      "PublicFormDto": {
+        "type": "object",
+        "properties": {
+          "publicId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "acceptingResponses": {
+            "type": "boolean",
+            "description": "false عند إغلاق الاستقبال أو أرشفة النموذج"
+          },
+          "versionId": {
+            "type": "string",
+            "nullable": true,
+            "description": "الإصدار المنشور الحالي؛ null عند الإغلاق"
+          },
+          "questions": {
+            "description": "فارغة عند إغلاق الاستقبال",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicQuestionDto"
+            }
+          }
+        },
+        "required": [
+          "publicId",
+          "title",
+          "description",
+          "acceptingResponses",
+          "versionId",
+          "questions"
+        ]
+      },
+      "SubmitAnswerDto": {
+        "type": "object",
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "id السؤال من PublicFormDto"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "نص للإجابة القصيرة والفقرة؛ رقم كنص عشري للرقم؛ YYYY-MM-DD للتاريخ؛ id الخيار للاختيار الواحد والقائمة؛ مصفوفة ids للاختيار المتعدد"
+          }
+        },
+        "required": [
+          "questionId",
+          "value"
+        ]
+      },
+      "SubmitResponseDto": {
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid",
+            "description": "مفتاح عشوائي لكل محاولة تعبئة؛ إعادة الطلب نفسه به تعيد الرقم المرجعي الأصلي"
+          },
+          "answers": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubmitAnswerDto"
+            }
+          }
+        },
+        "required": [
+          "versionId",
+          "idempotencyKey"
+        ]
+      },
+      "SubmitResultDto": {
+        "type": "object",
+        "properties": {
+          "referenceCode": {
+            "type": "string",
+            "example": "K7Q2-M9XD-4TPB",
+            "description": "رقم مرجعي لا يمنح أي حق قراءة"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "referenceCode",
+          "submittedAt"
         ]
       },
       "FormsSummaryDto": {

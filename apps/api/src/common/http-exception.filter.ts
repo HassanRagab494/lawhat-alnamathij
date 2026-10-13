@@ -10,7 +10,7 @@ import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import type { ApiErrorBody } from './errors';
-import { DRAFT_REQUEST_MAX_BYTES } from '../forms/questions/limits';
+import { DRAFT_REQUEST_MAX_BYTES, RESPONSE_REQUEST_MAX_BYTES } from '../forms/questions/limits';
 
 /**
  * يحوّل كل الاستثناءات إلى ApiErrorBody. لا يسجّل جسم الطلب أبدًا
@@ -65,6 +65,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           message: `حجم المسودة يتجاوز الحد المسموح (${DRAFT_REQUEST_MAX_BYTES / 1024 / 1024} ميغابايت). لم يُحفظ شيء؛ قلّل المحتوى ثم أعد المحاولة.`,
         };
       }
+      if (exception.status === 413 && RESPONSE_PATH_PATTERN.test(req.path)) {
+        return {
+          statusCode: 413,
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `حجم الإجابات يتجاوز الحد المسموح (${RESPONSE_REQUEST_MAX_BYTES / 1024} كيلوبايت). لم يُرسل الرد؛ اختصر بعض الإجابات ثم أعد المحاولة.`,
+        };
+      }
       return { statusCode: exception.status, ...defaultForStatus(exception.status) };
     }
     if (exception instanceof Prisma.PrismaClientInitializationError) {
@@ -82,6 +89,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 }
 
+const RESPONSE_PATH_PATTERN = /^\/api\/public\/forms\/[^/]+\/responses\/?$/;
 const DRAFT_PATH_PATTERN = /^\/api\/forms\/[^/]+\/draft\/?$/;
 
 function isClientHttpError(value: unknown): value is { status: number } {

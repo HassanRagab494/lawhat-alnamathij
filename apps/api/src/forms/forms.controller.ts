@@ -29,6 +29,8 @@ import { CreateFormDto, FormDto, FormListDto, FormListQueryDto, UpdateFormDto } 
 import { DraftService } from './draft.service';
 import { FormDraftDto, SaveDraftDto } from './draft-dto';
 import { FormsService } from './forms.service';
+import { PublishFormDto, PublishResultDto } from './publish-dto';
+import { PublishService } from './publish.service';
 
 const idPipe = new ParseIdPipe('النموذج غير موجود.');
 
@@ -39,6 +41,7 @@ export class FormsController {
   constructor(
     private readonly forms: FormsService,
     private readonly drafts: DraftService,
+    private readonly publisher: PublishService,
   ) {}
 
   @Get()
@@ -145,5 +148,63 @@ export class FormsController {
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FormDraftDto> {
     return this.drafts.saveDraft(auth, id, body, meta);
+  }
+
+  @Post(':id/publish')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.FORMS_PUBLISH)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'نشر المسودة المحفوظة كإصدار ثابت',
+    description:
+      'ينسخ العنوان والوصف والأسئلة والخيارات وإعداداتها إلى إصدار جديد رقمه = الأعلى + 1. يتطلب revision المسودة المحفوظة (قديم ⇒ 409 REVISION_CONFLICT مع details.current). يُمنع نشر نموذج بلا أسئلة أو فيه سؤال رفع ملفات أو بيانات غير صحيحة (409 PUBLISH_BLOCKED مع details.reasons). إعادة الطلب بنفس publishKey تعيد الإصدار نفسه (replayed: true). أول نشر يفتح الاستقبال فقط إن أُرسل openResponses: true؛ التحديثات تحافظ على حالة الاستقبال.',
+  })
+  @ApiOkResponse({ type: PublishResultDto })
+  @ApiConflictResponse({
+    description: 'REVISION_CONFLICT أو PUBLISH_BLOCKED أو FORM_ARCHIVED أو PUBLISH_KEY_REUSED',
+  })
+  publish(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', idPipe) id: string,
+    @Body() dto: PublishFormDto,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<PublishResultDto> {
+    return this.publisher.publish(auth, id, dto, meta);
+  }
+
+  @Post(':id/responses/open')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.FORMS_INTAKE)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'فتح استقبال الردود',
+    description:
+      'يتطلب نموذجًا غير مؤرشف وله إصدار منشور (409 FORM_ARCHIVED أو NOT_PUBLISHED). الطلب على الحالة نفسها لا يغيّر شيئًا.',
+  })
+  @ApiOkResponse({ type: FormDto })
+  openResponses(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', idPipe) id: string,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<FormDto> {
+    return this.publisher.setIntake(auth, id, true, meta);
+  }
+
+  @Post(':id/responses/close')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.FORMS_INTAKE)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'إغلاق استقبال الردود',
+    description:
+      'بعد اكتماله لا يُقبل أي رد جديد، حتى من صفحات فُتحت قبله (الإرسال والإغلاق يأخذان قفل النموذج نفسه).',
+  })
+  @ApiOkResponse({ type: FormDto })
+  closeResponses(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', idPipe) id: string,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<FormDto> {
+    return this.publisher.setIntake(auth, id, false, meta);
   }
 }

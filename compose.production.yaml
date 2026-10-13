@@ -1,0 +1,103 @@
+# إعداد الإنتاج/التجربة لـ Coolify (Docker Compose build pack) — مستقل عن compose.yaml الخاص بالتطوير.
+# المشروع: lawhat-alnamathij · الدومين المخطط: forms.flowmaxsa.cloud (يُربط بخدمة web فقط من واجهة Coolify).
+# لا تحتوي هذه الملفات على أسرار؛ القيم المطلوبة تُضبط في متغيرات Coolify (انظر deploy/coolify/README.md).
+#
+# حدود الثقة (docs/trust-boundary.md):
+#   الزائر ⇒ وكيل Coolify (Traefik) ⇒ web:3000 ⇒ [شبكة backend الداخلية] ⇒ api:4000 ⇒ mysql:3306
+#   - لا يوجد `ports:` لأي خدمة: لا منفذ منشور على المضيف.
+#   - api وmysql على شبكة backend الداخلية فقط (internal: true)؛ لا دومين ولا router لهما.
+#   - web يصل إلى api عبر الاسم المستعار lawha-api-backend المعرّف على شبكة backend وحدها،
+#     فيأتي اتصاله من BACKEND_SUBNET، وTRUST_PROXY في api = BACKEND_SUBNET فقط.
+
+name: lawhat-alnamathij
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: lawha
+      MYSQL_USER: lawha
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?اضبط MYSQL_PASSWORD في Coolify}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?اضبط MYSQL_ROOT_PASSWORD في Coolify}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    volumes:
+      # تخزين دائم خاص بهذا المشروع. حذف المورد مع «حذف الـ volumes» يمسح البيانات.
+      - lawha-mysql-data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_NAME: ${APP_NAME:-لوحة النماذج}
+      API_PORT: '4000'
+      # كلمة MYSQL_PASSWORD تُستخدم داخل URL: استخدم أحرفًا وأرقامًا فقط، أو رمّزها (percent-encoding).
+      DATABASE_URL: mysql://lawha:${MYSQL_PASSWORD}@mysql:3306/lawha
+      WEB_ORIGIN: ${WEB_ORIGIN:?اضبط WEB_ORIGIN مثل https://forms.flowmaxsa.cloud}
+      COOKIE_SECURE: 'true'
+      # يثق بـ X-Forwarded-For من شبكة backend فقط (أي من web). لا تضع true أو شبكة عامة.
+      TRUST_PROXY: ${BACKEND_SUBNET:-10.213.47.0/28}
+      API_DOCS_ENABLED: 'false'
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-120}
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
+      LOGIN_RATE_LIMIT_PER_MINUTE: ${LOGIN_RATE_LIMIT_PER_MINUTE:-10}
+      PUBLIC_SUBMIT_PER_IP_PER_MINUTE: ${PUBLIC_SUBMIT_PER_IP_PER_MINUTE:-10}
+      PUBLIC_SUBMIT_PER_FORM_PER_MINUTE: ${PUBLIC_SUBMIT_PER_FORM_PER_MINUTE:-120}
+    expose:
+      - '4000'
+    networks:
+      backend:
+        aliases:
+          - lawha-api-backend
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # العنوان الداخلي للـ API على شبكة backend؛ يُثبت وقت البناء.
+        API_ORIGIN: http://lawha-api-backend:4000
+        APP_NAME: ${APP_NAME:-لوحة النماذج}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+    expose:
+      - '3000'
+    networks:
+      # default: الشبكة التي يربط بها Coolify وكيله؛ backend: للوصول إلى api فقط.
+      - default
+      - backend
+
+networks:
+  default: {}
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${BACKEND_SUBNET:-10.213.47.0/28}
+
+volumes:
+  lawha-mysql-data:

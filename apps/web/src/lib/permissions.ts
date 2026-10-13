@@ -9,6 +9,16 @@ export const PERMISSION_OPTIONS: { key: Permission; label: string; hint: string 
     label: 'أرشفة النماذج واستعادتها',
     hint: 'نقل النماذج إلى الأرشيف وإعادتها.',
   },
+  {
+    key: 'FORMS_PUBLISH',
+    label: 'نشر النماذج',
+    hint: 'نشر إصدار ثابت من المسودة وإتاحة الرابط العام.',
+  },
+  {
+    key: 'FORMS_INTAKE',
+    label: 'فتح وإغلاق استقبال الردود',
+    hint: 'التحكم في قبول الردود على الرابط العام.',
+  },
 ];
 
 export const PERMISSION_LABELS = Object.fromEntries(
@@ -16,7 +26,13 @@ export const PERMISSION_LABELS = Object.fromEntries(
 ) as Record<Permission, string>;
 
 /** الصلاحيات التي تتطلب صلاحية العرض (مطابقة لقواعد الـ Backend). */
-const REQUIRES_VIEW: Permission[] = ['FORMS_CREATE', 'FORMS_EDIT', 'FORMS_ARCHIVE'];
+const REQUIRES_VIEW: Permission[] = [
+  'FORMS_CREATE',
+  'FORMS_EDIT',
+  'FORMS_ARCHIVE',
+  'FORMS_PUBLISH',
+  'FORMS_INTAKE',
+];
 
 /** يبدّل صلاحية مع الحفاظ على الاعتماديات: تفعيل صلاحية تابعة يفعّل العرض، وإلغاء العرض يلغي التوابع. */
 export function togglePermission(

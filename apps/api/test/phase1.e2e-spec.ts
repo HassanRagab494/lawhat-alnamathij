@@ -122,6 +122,8 @@ describe('المرحلة الأولى', () => {
       'FORMS_CREATE',
       'FORMS_EDIT',
       'FORMS_ARCHIVE',
+      'FORMS_PUBLISH',
+      'FORMS_INTAKE',
     ]);
     // الجلسة مخزنة كتجزئة فقط
     const token = sessionCookie.split(';')[0]!.split('=')[1]!;

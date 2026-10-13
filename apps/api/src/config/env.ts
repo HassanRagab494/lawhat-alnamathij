@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { trustProxyError } from './trust-proxy';
 
 const booleanFromString = z
   .enum(['true', 'false'], { message: 'يجب أن تكون القيمة true أو false' })
@@ -33,9 +34,23 @@ const envSchema = z.object({
     .max(24 * 60)
     .default(15),
   LOGIN_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(10),
+  /** حد إرسال الردود العامة لكل عنوان IP في الدقيقة. */
+  PUBLIC_SUBMIT_PER_IP_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(10),
+  /** حد إرسال الردود العامة لكل نموذج في الدقيقة (من كل العناوين معًا). */
+  PUBLIC_SUBMIT_PER_FORM_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(120),
+  /**
+   * قيمة Express «trust proxy»: من يُوثق بترويسة X-Forwarded-For منه لتحديد IP العميل.
+   * محليًا: loopback (Next.js على الجهاز نفسه). في الإنتاج: عنوان Next.js أو شبكته الداخلية فقط،
+   * ويجب ضبطه صراحة. القواعد في trust-proxy.ts.
+   */
+  TRUST_PROXY: z.string().trim().min(1).default('loopback'),
+  /** وثائق /api/docs: مفعّلة افتراضيًا في التطوير ومعطّلة افتراضيًا في الإنتاج. */
+  API_DOCS_ENABLED: booleanFromString.optional(),
 });
 
-export type AppEnv = z.infer<typeof envSchema>;
+export type AppEnv = Omit<z.infer<typeof envSchema>, 'API_DOCS_ENABLED'> & {
+  API_DOCS_ENABLED: boolean;
+};
 
 export class EnvValidationError extends Error {}
 
@@ -48,10 +63,24 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     );
     throw new EnvValidationError(`إعدادات البيئة غير صالحة:\n${lines.join('\n')}`);
   }
-  const env = result.data;
-  if (env.NODE_ENV === 'production' && !env.COOKIE_SECURE) {
+  const production = result.data.NODE_ENV === 'production';
+  const env: AppEnv = {
+    ...result.data,
+    API_DOCS_ENABLED: result.data.API_DOCS_ENABLED ?? !production,
+  };
+  const problems: string[] = [];
+  if (production && !env.COOKIE_SECURE) {
+    problems.push('COOKIE_SECURE: يجب أن تكون true في الإنتاج');
+  }
+  if (production && !source.TRUST_PROXY?.trim()) {
+    problems.push('TRUST_PROXY: مطلوب صراحة في الإنتاج (عنوان الواجهة Next.js أو شبكتها الداخلية)');
+  } else {
+    const trustError = trustProxyError(env.TRUST_PROXY, production);
+    if (trustError) problems.push(`TRUST_PROXY: ${trustError}`);
+  }
+  if (problems.length) {
     throw new EnvValidationError(
-      'إعدادات البيئة غير صالحة:\n  - COOKIE_SECURE: يجب أن تكون true في الإنتاج',
+      `إعدادات البيئة غير صالحة:\n${problems.map((line) => `  - ${line}`).join('\n')}`,
     );
   }
   return env;

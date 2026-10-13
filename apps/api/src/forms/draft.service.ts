@@ -7,7 +7,7 @@ import { Errors, type FieldError } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
 import type { FormDraftDto, QuestionDto } from './draft-dto';
 import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
-import { toFormDto } from './forms.service';
+import { latestVersionInclude, toFormDto } from './forms.service';
 import {
   parseSaveDraft,
   type OptionInput,
@@ -18,6 +18,7 @@ import type { QuestionTypeKey } from './questions/limits';
 
 const draftInclude = {
   createdBy: { select: { id: true, displayName: true } },
+  versions: latestVersionInclude,
   draft: {
     include: {
       questions: {

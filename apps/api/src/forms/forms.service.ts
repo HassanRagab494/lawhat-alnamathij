@@ -6,12 +6,33 @@ import type { RequestMeta } from '../auth/decorators';
 import { Errors } from '../common/errors';
 import { pageMeta } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateFormDto, FormDto, FormListDto, FormListQueryDto, UpdateFormDto } from './dto';
+import type {
+  CreateFormDto,
+  FormDto,
+  FormListDto,
+  FormListQueryDto,
+  FormPublicationDto,
+  UpdateFormDto,
+} from './dto';
 import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
+
+/** آخر إصدار منشور فقط (لحالة النشر)؛ الإصدارات كاملة لا تُحمَّل هنا. */
+export const latestVersionInclude = {
+  orderBy: { versionNumber: 'desc' },
+  take: 1,
+  select: {
+    id: true,
+    versionNumber: true,
+    sourceDraftRevision: true,
+    publishedAt: true,
+    publishedBy: { select: { id: true, displayName: true } },
+  },
+} satisfies Prisma.Form$versionsArgs;
 
 const formInclude = {
   draft: true,
   createdBy: { select: { id: true, displayName: true } },
+  versions: latestVersionInclude,
 } satisfies Prisma.FormInclude;
 
 type FormWithDraft = Prisma.FormGetPayload<{ include: typeof formInclude }>;
@@ -24,13 +45,32 @@ export function toFormDto(form: FormWithDraft): FormDto {
     id: form.id,
     title: form.draft.title,
     description: form.draft.description,
-    publicationStatus: 'draft',
+    publicationStatus: form.versions[0] ? 'published' : 'draft',
+    publication: toPublicationDto(form),
     isArchived: form.archivedAt !== null,
     revision: form.draft.revision,
     createdBy: form.createdBy,
     createdAt: form.createdAt.toISOString(),
     updatedAt: form.updatedAt.toISOString(),
     archivedAt: form.archivedAt?.toISOString() ?? null,
+  };
+}
+
+/** حالة النشر والاستقبال. hasUnpublishedChanges: revision المسودة الحالي يختلف عن revision آخر إصدار منشور. */
+export function toPublicationDto(form: FormWithDraft): FormPublicationDto {
+  const latest = form.versions[0];
+  return {
+    publicId: form.publicId,
+    acceptingResponses: form.acceptingResponses,
+    latestVersion: latest
+      ? {
+          id: latest.id,
+          versionNumber: latest.versionNumber,
+          publishedAt: latest.publishedAt.toISOString(),
+          publishedBy: latest.publishedBy,
+        }
+      : null,
+    hasUnpublishedChanges: latest ? latest.sourceDraftRevision !== form.draft!.revision : true,
   };
 }
 
@@ -196,7 +236,13 @@ export class FormsService {
       const result = await tx.form.updateMany({
         where: { id, archivedAt: archive ? null : { not: null } },
         data: archive
-          ? { archivedAt: now, archivedById: actor.userId, updatedAt: now }
+          ? // الأرشفة تغلق الاستقبال؛ الاستعادة لا تعيد فتحه تلقائيًا.
+            {
+              archivedAt: now,
+              archivedById: actor.userId,
+              updatedAt: now,
+              acceptingResponses: false,
+            }
           : { archivedAt: null, archivedById: null, updatedAt: now },
       });
       if (result.count === 0) {

@@ -1,6 +1,7 @@
 // أنواع مطابقة لاستجابات الـ API (انظر docs/openapi.json).
 
-export type Permission = 'FORMS_VIEW' | 'FORMS_CREATE' | 'FORMS_EDIT' | 'FORMS_ARCHIVE';
+export type Permission =
+  'FORMS_VIEW' | 'FORMS_CREATE' | 'FORMS_EDIT' | 'FORMS_ARCHIVE' | 'FORMS_PUBLISH' | 'FORMS_INTAKE';
 export type UserRole = 'ADMIN' | 'SUPERVISOR';
 
 export interface Me {
@@ -27,13 +28,28 @@ export interface FormItem {
   id: string;
   title: string;
   description: string | null;
-  publicationStatus: 'draft';
+  publicationStatus: 'draft' | 'published';
   isArchived: boolean;
   revision: number;
   createdBy: { id: string; displayName: string };
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
+  publication: FormPublication;
+}
+
+export interface PublishedVersionRef {
+  id: string;
+  versionNumber: number;
+  publishedAt: string;
+  publishedBy: { id: string; displayName: string } | null;
+}
+
+export interface FormPublication {
+  publicId: string | null;
+  acceptingResponses: boolean;
+  latestVersion: PublishedVersionRef | null;
+  hasUnpublishedChanges: boolean;
 }
 
 export interface UserItem {

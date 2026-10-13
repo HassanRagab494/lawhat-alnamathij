@@ -14,5 +14,6 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|login|_next|favicon.ico).*)'],
+  // /f/... صفحات التعبئة العامة بلا جلسة.
+  matcher: ['/((?!api|login|f/|_next|favicon.ico).*)'],
 };

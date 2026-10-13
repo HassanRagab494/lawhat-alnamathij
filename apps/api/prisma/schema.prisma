@@ -23,6 +23,10 @@ enum Permission {
   FORMS_CREATE
   FORMS_EDIT
   FORMS_ARCHIVE
+  /// نشر إصدار ثابت من المسودة (المرحلة الثالثة)
+  FORMS_PUBLISH
+  /// فتح استقبال الردود وإغلاقه
+  FORMS_INTAKE
 }
 
 model User {
@@ -52,6 +56,7 @@ model User {
   grantedPermissions UserPermission[] @relation("PermissionGrantor")
   sessions           Session[]
   createdForms       Form[]           @relation("FormCreatedBy")
+  publishedVersions  FormVersion[]    @relation("VersionPublishedBy")
   archivedForms      Form[]           @relation("FormArchivedBy")
   draftUpdates       FormDraft[]      @relation("DraftUpdatedBy")
   auditLogs          AuditLog[]
@@ -99,16 +104,22 @@ model Session {
 /// السجل المستقل للنموذج. لا يحمل محتوى؛ المحتوى القابل للتعديل في FormDraft،
 /// والإصدارات المنشورة الثابتة ستُضاف لاحقًا كجدول مستقل مرتبط بـ Form.
 model Form {
-  id           String    @id @default(uuid(7)) @db.Char(36)
-  createdById  String    @map("created_by_id") @db.Char(36)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
-  archivedAt   DateTime? @map("archived_at") @db.DateTime(3)
-  archivedById String?   @map("archived_by_id") @db.Char(36)
+  id                 String    @id @default(uuid(7)) @db.Char(36)
+  createdById        String    @map("created_by_id") @db.Char(36)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  archivedAt         DateTime? @map("archived_at") @db.DateTime(3)
+  archivedById       String?   @map("archived_by_id") @db.Char(36)
+  /// معرّف عام عشوائي للرابط /f/<publicId>؛ يُنشأ عند أول نشر ولا يتغير.
+  publicId           String?   @unique @map("public_id") @db.VarChar(32)
+  /// حالة استقبال الردود، مستقلة عن النشر. الأرشفة تغلقها والاستعادة لا تعيد فتحها.
+  acceptingResponses Boolean   @default(false) @map("accepting_responses")
 
-  createdBy  User       @relation("FormCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  archivedBy User?      @relation("FormArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  createdBy  User           @relation("FormCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  archivedBy User?          @relation("FormArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
   draft      FormDraft?
+  versions   FormVersion[]
+  responses  FormResponse[]
 
   @@index([archivedAt, updatedAt])
   @@map("forms")
@@ -197,4 +208,118 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// إصدار منشور ثابت: نسخة كاملة من المسودة وقت النشر، لا يعتمد على سجلات المسودة.
+model FormVersion {
+  id                  String   @id @default(uuid(7)) @db.Char(36)
+  formId              String   @map("form_id") @db.Char(36)
+  versionNumber       Int      @map("version_number")
+  title               String   @db.VarChar(200)
+  description         String?  @db.Text
+  /// revision المسودة التي نُشرت؛ اختلافه عن revision الحالي يعني وجود تعديلات غير منشورة.
+  sourceDraftRevision Int      @map("source_draft_revision")
+  /// مفتاح إعادة محاولة النشر (من العميل)؛ إعادة الطلب نفسه تعيد الإصدار نفسه.
+  publishKey          String   @map("publish_key") @db.Char(36)
+  publishedById       String   @map("published_by_id") @db.Char(36)
+  publishedAt         DateTime @default(now()) @map("published_at") @db.DateTime(3)
+
+  form        Form                  @relation(fields: [formId], references: [id], onDelete: Restrict)
+  publishedBy User                  @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+  questions   FormVersionQuestion[]
+  responses   FormResponse[]
+
+  @@unique([formId, versionNumber])
+  @@unique([formId, publishKey])
+  @@map("form_versions")
+}
+
+model FormVersionQuestion {
+  id          String       @id @default(uuid(7)) @db.Char(36)
+  versionId   String       @map("version_id") @db.Char(36)
+  /// معرّف السؤال المنطقي عبر الإصدارات (معرّف سؤال المسودة وقت النشر)؛ ليس مفتاحًا أجنبيًا.
+  logicalId   String       @map("logical_id") @db.Char(36)
+  position    Int
+  type        QuestionType
+  title       String       @db.VarChar(300)
+  description String?      @db.Text
+  required    Boolean
+  settings    Json
+
+  version FormVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  options FormVersionOption[]
+  answers FormAnswer[]
+
+  @@unique([versionId, logicalId])
+  @@index([versionId, position])
+  @@map("form_version_questions")
+}
+
+model FormVersionOption {
+  id         String @id @default(uuid(7)) @db.Char(36)
+  questionId String @map("question_id") @db.Char(36)
+  logicalId  String @map("logical_id") @db.Char(36)
+  position   Int
+  label      String @db.VarChar(200)
+
+  question FormVersionQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  selected FormAnswerOption[]
+
+  @@index([questionId, position])
+  @@map("form_version_options")
+}
+
+enum ResponseStatus {
+  NEW
+}
+
+/// رد زائر على إصدار منشور. لا يُخزَّن IP أو User-Agent.
+model FormResponse {
+  id             String         @id @default(uuid(7)) @db.Char(36)
+  formId         String         @map("form_id") @db.Char(36)
+  versionId      String         @map("version_id") @db.Char(36)
+  /// رقم مرجعي عشوائي غير متسلسل يُعرض للزائر؛ لا يمنح أي حق قراءة.
+  referenceCode  String         @unique @map("reference_code") @db.VarChar(16)
+  status         ResponseStatus @default(NEW)
+  /// مفتاح إعادة المحاولة من العميل؛ فريد لكل نموذج، فإعادة الطلب نفسه تعيد الرد الأصلي.
+  idempotencyKey String         @map("idempotency_key") @db.Char(36)
+  /// SHA-256 لمحتوى الطلب المطبّع (الإصدار والإجابات) لكشف إعادة استخدام المفتاح بمحتوى مختلف.
+  requestHash    String         @map("request_hash") @db.Char(64)
+  submittedAt    DateTime       @default(now()) @map("submitted_at") @db.DateTime(3)
+
+  form    Form         @relation(fields: [formId], references: [id], onDelete: Restrict)
+  version FormVersion  @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  answers FormAnswer[]
+
+  @@unique([formId, idempotencyKey])
+  @@index([formId, submittedAt])
+  @@map("form_responses")
+}
+
+/// إجابة سؤال واحد. العمود المستخدم حسب نوع السؤال: نص، رقم عشري، تاريخ، أو خيارات في form_answer_options.
+model FormAnswer {
+  id          String    @id @default(uuid(7)) @db.Char(36)
+  responseId  String    @map("response_id") @db.Char(36)
+  questionId  String    @map("question_id") @db.Char(36)
+  textValue   String?   @map("text_value") @db.Text
+  numberValue Decimal?  @map("number_value") @db.Decimal(23, 10)
+  dateValue   DateTime? @map("date_value") @db.Date
+
+  response FormResponse        @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question FormVersionQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  options  FormAnswerOption[]
+
+  @@unique([responseId, questionId])
+  @@map("form_answers")
+}
+
+model FormAnswerOption {
+  answerId String @map("answer_id") @db.Char(36)
+  optionId String @map("option_id") @db.Char(36)
+
+  answer FormAnswer        @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  option FormVersionOption @relation(fields: [optionId], references: [id], onDelete: Restrict)
+
+  @@id([answerId, optionId])
+  @@map("form_answer_options")
 }

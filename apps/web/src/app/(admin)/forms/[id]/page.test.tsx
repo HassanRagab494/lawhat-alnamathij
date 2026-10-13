@@ -14,6 +14,12 @@ const { form, apiMock, setData } = vi.hoisted(() => ({
     updatedAt: '2026-10-12T00:00:00Z',
     archivedAt: null,
     publicationStatus: 'draft',
+    publication: {
+      publicId: null,
+      acceptingResponses: false,
+      latestVersion: null,
+      hasUnpublishedChanges: true,
+    },
     questions: [] as unknown[],
   },
   apiMock: vi.fn(),

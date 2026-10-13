@@ -12,6 +12,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   FORMS_CREATE: 'إنشاء النماذج',
   FORMS_EDIT: 'تعديل النماذج',
   FORMS_ARCHIVE: 'أرشفة النماذج واستعادتها',
+  FORMS_PUBLISH: 'نشر النماذج',
+  FORMS_INTAKE: 'فتح وإغلاق استقبال الردود',
 };
 
 /** صلاحيات لا معنى لها دون صلاحية أخرى (مثلًا: لا تعديل دون عرض). */
@@ -19,6 +21,8 @@ export const PERMISSION_REQUIRES: Partial<Record<Permission, Permission>> = {
   FORMS_CREATE: 'FORMS_VIEW',
   FORMS_EDIT: 'FORMS_VIEW',
   FORMS_ARCHIVE: 'FORMS_VIEW',
+  FORMS_PUBLISH: 'FORMS_VIEW',
+  FORMS_INTAKE: 'FORMS_VIEW',
 };
 
 /** مدير النظام يملك كل الصلاحيات دائمًا؛ المشرف يملك ما مُنح له فقط. */

@@ -10,9 +10,12 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   configureApp(app, env);
-  mountOpenApi(app, env);
+  const docs = mountOpenApi(app, env);
   await app.listen(env.API_PORT);
-  Logger.log(`API تعمل على http://localhost:${env.API_PORT}/api — التوثيق: /api/docs`, 'Bootstrap');
+  Logger.log(
+    `API تعمل على المنفذ ${env.API_PORT} — التوثيق: ${docs ? '/api/docs' : 'معطّل (API_DOCS_ENABLED)'}`,
+    'Bootstrap',
+  );
 }
 
 main().catch((error: unknown) => {

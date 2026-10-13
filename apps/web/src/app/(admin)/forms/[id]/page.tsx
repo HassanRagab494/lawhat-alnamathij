@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FormBasicsFields } from '@/components/form-fields';
 import { FormRenderer } from '@/components/form-renderer';
+import { PublishPanel } from '@/components/publish-panel';
 import { RequirePermission } from '@/components/guards';
 import { QuestionEditor, type QuestionErrors } from '@/components/question-editor';
 import {
@@ -480,29 +481,46 @@ function FormDetails() {
           )}
         </div>
 
-        <Card className="h-fit p-5">
-          <h2 className="mb-4 text-base font-bold text-velvet-900">معلومات النموذج</h2>
-          <dl className="flex flex-col gap-4">
-            <Meta
-              label="الحالة"
-              value={
-                <span className="flex flex-wrap gap-1.5">
-                  <Badge tone="velvet">مسودة غير منشورة</Badge>
-                  {form.isArchived && <Badge tone="muted">مؤرشف</Badge>}
-                </span>
-              }
-            />
-            <Meta label="عدد الأسئلة المحفوظة" value={form.questions.length} />
-            <Meta label="رقم مراجعة المسودة" value={form.revision} />
-            <Meta label="أنشأه" value={form.createdBy.displayName} />
-            <Meta label="تاريخ الإنشاء" value={formatDateTime(form.createdAt)} />
-            <Meta label="آخر تعديل" value={formatDateTime(form.updatedAt)} />
-            {form.archivedAt && (
-              <Meta label="تاريخ الأرشفة" value={formatDateTime(form.archivedAt)} />
-            )}
-          </dl>
-          <p className="mt-4 text-xs text-muted">الأوقات بتوقيت الرياض.</p>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <PublishPanel
+            form={form}
+            me={me}
+            dirty={dirty}
+            onUpdated={(updated, message) => {
+              // تحديث بيانات الحالة فقط؛ تبقى أي تعديلات محلية في المحرر.
+              setSaved((s) => (s ? { ...s, ...updated, questions: s.questions } : s));
+              setSuccess(message);
+            }}
+            onConflict={(current) => setConflict(current)}
+          />
+          <Card className="h-fit p-5">
+            <h2 className="mb-4 text-base font-bold text-velvet-900">معلومات النموذج</h2>
+            <dl className="flex flex-col gap-4">
+              <Meta
+                label="الحالة"
+                value={
+                  <span className="flex flex-wrap gap-1.5">
+                    {form.publication.latestVersion ? (
+                      <Badge tone="success">منشور</Badge>
+                    ) : (
+                      <Badge tone="velvet">مسودة غير منشورة</Badge>
+                    )}
+                    {form.isArchived && <Badge tone="muted">مؤرشف</Badge>}
+                  </span>
+                }
+              />
+              <Meta label="عدد الأسئلة المحفوظة" value={form.questions.length} />
+              <Meta label="رقم مراجعة المسودة" value={form.revision} />
+              <Meta label="أنشأه" value={form.createdBy.displayName} />
+              <Meta label="تاريخ الإنشاء" value={formatDateTime(form.createdAt)} />
+              <Meta label="آخر تعديل" value={formatDateTime(form.updatedAt)} />
+              {form.archivedAt && (
+                <Meta label="تاريخ الأرشفة" value={formatDateTime(form.archivedAt)} />
+              )}
+            </dl>
+            <p className="mt-4 text-xs text-muted">الأوقات بتوقيت الرياض.</p>
+          </Card>
+        </div>
       </div>
 
       {canEdit && (

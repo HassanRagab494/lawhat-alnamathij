@@ -1,32 +1,67 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { validateAnswers, type AnswerValue, type RenderQuestion } from '@/lib/answer-validation';
 import { FILE_TYPE_LABELS } from '@/lib/question-limits';
 import { Alert, Button, EmptyState, SelectInput, TextArea, TextInput } from './ui';
 
+export type Answers = Record<string, AnswerValue>;
+
+/** وضع التعبئة العامة: الإجابات والأخطاء تديرها الصفحة، والإرسال الفعلي عبر onSubmit. */
+export interface PublicModeProps {
+  answers: Answers;
+  onAnswersChange: (next: Answers) => void;
+  /** أخطاء لكل سؤال (بمفتاح السؤال)، من التحقق المحلي أو من الخادم. */
+  errors: Record<string, string>;
+  onErrorsChange: (next: Record<string, string>) => void;
+  /** يُستدعى فقط بعد نجاح التحقق المحلي. */
+  onSubmit: (answers: Answers) => void;
+  submitting: boolean;
+  /** رسالة عامة فوق زر الإرسال (فشل الشبكة، تحديث الإصدار...). */
+  notice?: ReactNode;
+  /** يعطّل الإرسال (مثلًا حين يلزم تحديث النموذج أولًا). */
+  submitDisabled?: boolean;
+}
+
 /**
- * يعرض النموذج كما سيراه من يعبّئه. مصمم لإعادة الاستخدام في الصفحة العامة لاحقًا،
- * لكنه في هذه المرحلة يعمل بوضع «معاينة» فقط: لا يرسل ولا يحفظ أي إجابة.
+ * يعرض النموذج كما سيراه من يعبّئه، بوضعين:
+ * - المعاينة (الافتراضي): لا يرسل ولا يحفظ أي إجابة.
+ * - العام (publicMode): تعبئة حقيقية بزر «إرسال»؛ الإجابات تبقى في الذاكرة فقط (لا localStorage).
  */
 export function FormRenderer({
   title,
   description,
   questions,
+  publicMode,
 }: {
   title: string;
   description: string | null;
   questions: RenderQuestion[];
+  publicMode?: PublicModeProps;
 }) {
-  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [localAnswers, setLocalAnswers] = useState<Answers>({});
+  const [localErrors, setLocalErrors] = useState<Record<string, string>>({});
   const [checked, setChecked] = useState<'valid' | 'invalid' | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const answers = publicMode ? publicMode.answers : localAnswers;
+  const errors = publicMode ? publicMode.errors : localErrors;
+  const setAnswers = publicMode ? publicMode.onAnswersChange : setLocalAnswers;
+  const setErrors = publicMode ? publicMode.onErrorsChange : setLocalErrors;
 
   function setAnswer(key: string, value: AnswerValue) {
-    setAnswers((a) => ({ ...a, [key]: value }));
-    if (errors[key])
-      setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== key)));
+    setAnswers({ ...answers, [key]: value });
+    if (errors[key]) {
+      setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== key)));
+    }
     setChecked(null);
+  }
+
+  function focusFirstError() {
+    requestAnimationFrame(() => {
+      const section = formRef.current?.querySelector('[data-question-error="true"]');
+      section?.querySelector<HTMLElement>('input, textarea, select')?.focus();
+    });
   }
 
   function runValidation() {
@@ -35,14 +70,41 @@ export function FormRenderer({
     setChecked(Object.keys(result).length ? 'invalid' : 'valid');
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!publicMode || publicMode.submitting || publicMode.submitDisabled) return;
+    const result = validateAnswers(questions, answers);
+    setErrors(result);
+    if (Object.keys(result).length) {
+      focusFirstError();
+      return;
+    }
+    publicMode.onSubmit(answers);
+  }
+
+  const errorCount = Object.keys(errors).length;
+  const heading = title.trim() || 'نموذج بلا عنوان';
+
   return (
-    <div className="flex flex-col gap-4">
-      <Alert tone="info" title="معاينة — لن تُحفظ الإجابات">
-        جرّب تعبئة النموذج والتحقق من الإجابات. لا يُرسل أي شيء ولا يُنشأ أي رد.
-      </Alert>
+    <form
+      ref={formRef}
+      noValidate
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-4"
+      aria-busy={publicMode?.submitting || undefined}
+    >
+      {!publicMode && (
+        <Alert tone="info" title="معاينة — لن تُحفظ الإجابات">
+          جرّب تعبئة النموذج والتحقق من الإجابات. لا يُرسل أي شيء ولا يُنشأ أي رد.
+        </Alert>
+      )}
 
       <section className="glass rounded-2xl border-t-4 border-t-velvet-700 p-5 sm:p-6">
-        <h2 className="text-xl font-bold text-velvet-900">{title.trim() || 'نموذج بلا عنوان'}</h2>
+        {publicMode ? (
+          <h1 className="text-xl font-bold text-velvet-900 sm:text-2xl">{heading}</h1>
+        ) : (
+          <h2 className="text-xl font-bold text-velvet-900">{heading}</h2>
+        )}
         {description && (
           <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted">
             {description}
@@ -69,7 +131,7 @@ export function FormRenderer({
         ))
       )}
 
-      {questions.length > 0 && (
+      {questions.length > 0 && !publicMode && (
         <div className="flex flex-col gap-3">
           {checked === 'valid' && (
             <Alert tone="success">
@@ -78,7 +140,7 @@ export function FormRenderer({
           )}
           {checked === 'invalid' && (
             <Alert tone="error">
-              توجد {Object.keys(errors).length} إجابة غير صالحة. راجع الرسائل بجانب الأسئلة.
+              توجد {errorCount} إجابة غير صالحة. راجع الرسائل بجانب الأسئلة.
             </Alert>
           )}
           <div className="flex flex-wrap gap-2">
@@ -88,8 +150,8 @@ export function FormRenderer({
             <Button
               variant="ghost"
               onClick={() => {
-                setAnswers({});
-                setErrors({});
+                setLocalAnswers({});
+                setLocalErrors({});
                 setChecked(null);
               }}
             >
@@ -98,7 +160,28 @@ export function FormRenderer({
           </div>
         </div>
       )}
-    </div>
+
+      {questions.length > 0 && publicMode && (
+        <div className="flex flex-col gap-3">
+          {errorCount > 0 && (
+            <Alert tone="error">
+              {errorCount === 1
+                ? 'توجد إجابة تحتاج مراجعة. راجع الرسالة بجانب السؤال.'
+                : `توجد ${errorCount} إجابات تحتاج مراجعة. راجع الرسائل بجانب الأسئلة.`}
+            </Alert>
+          )}
+          {publicMode.notice}
+          <Button
+            type="submit"
+            className="w-full sm:w-auto sm:self-start"
+            loading={publicMode.submitting}
+            disabled={publicMode.submitDisabled}
+          >
+            {publicMode.submitting ? 'جارٍ الإرسال…' : 'إرسال'}
+          </Button>
+        </div>
+      )}
+    </form>
   );
 }
 
@@ -304,7 +387,11 @@ function PreviewQuestion({
   }
 
   return (
-    <section className="glass rounded-2xl p-5" aria-invalid={Boolean(error) || undefined}>
+    <section
+      className="glass rounded-2xl p-5"
+      aria-invalid={Boolean(error) || undefined}
+      data-question-error={error ? 'true' : undefined}
+    >
       {isGroup ? (
         <fieldset aria-describedby={describedBy}>
           <legend className="mb-2 text-base font-semibold text-ink">{labelContent}</legend>

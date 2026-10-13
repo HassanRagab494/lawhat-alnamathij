@@ -1,4 +1,4 @@
-# البنية والقرارات — المرحلة الأولى
+# البنية والقرارات — المراحل الأولى إلى الثالثة
 
 ## هيكل المستودع
 
@@ -87,8 +87,9 @@ lawhat-alnamathij/
 
 - `forms` سجل مستقل للنموذج (المنشئ، الأوقات، الأرشفة) بلا محتوى.
 - `form_drafts` مسودة الإصدار الحالية (واحدة لكل نموذج، `form_id` فريد) تحمل العنوان والوصف و`revision`.
-- الإصدارات المنشورة الثابتة ستُضاف لاحقًا كجدول مستقل مرتبط بـ `forms` دون تغيير الجدولين الحاليين.
-- كل نموذج جديد مسودة غير منشورة (`publicationStatus: "draft"` في الـ API).
+- الإصدارات المنشورة (المرحلة الثالثة) نسخ مستقلة في `form_versions` وأسئلتها وخياراتها، لا تتغير بتعديل المسودة.
+- كل نموذج جديد مسودة غير منشورة (`publicationStatus: "draft"`)، ويصبح `published` بعد أول نشر.
+- **قفل النموذج:** الحفظ والتعديل والأرشفة والنشر وفتح الاستقبال وإغلاقه وإرسال الرد كلها تبدأ بـ `SELECT ... FOR UPDATE` على صف `forms` نفسه. لذلك تتسلسل هذه العمليات لكل نموذج: لا يُحفظ رد بعد إغلاق الاستقبال، ولا على إصدار لم يعد الأحدث.
 - **منع الكتابة الصامتة:** التعديل يرسل `revision` الذي بُني عليه، والتحديث `UPDATE ... WHERE form_id=? AND revision=?`
   يزيده بواحد. إن لم يطابق يُرجع 409 `REVISION_CONFLICT` مع النسخة الحالية، وتعرض الواجهة خيار الإبقاء على التعديلات أو تحميل النسخة الحالية.
 - النموذج المؤرشف لا يُعدَّل حتى يُستعاد. لا يوجد حذف نهائي.
@@ -107,16 +108,23 @@ lawhat-alnamathij/
 
 ## تصميم الجداول
 
-| الجدول             | الأعمدة الرئيسية                                                                                                                                                                                                                  | ملاحظات                            |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `users`            | `id`، `username` (فريد، صغير)، `display_name`، `password_hash`، `role` (ADMIN/SUPERVISOR)، `is_active`، `failed_login_count`، `locked_until`، `last_login_at`، `password_changed_at`، `created_by_id`، `created_at`، `updated_at` |                                    |
-| `user_permissions` | (`user_id`، `permission`) مفتاح مركب، `granted_by_id`، `granted_at`                                                                                                                                                               | enum قابل للتوسعة بـ migration     |
-| `sessions`         | `id`، `token_hash` (فريد)، `csrf_token_hash`، `user_id`، `created_at`، `last_seen_at`، `expires_at`، `revoked_at`، `revoked_reason`، `ip_address`، `user_agent`                                                                   | لا يُخزن الرمز نفسه                |
-| `forms`            | `id`، `created_by_id`، `created_at`، `updated_at`، `archived_at`، `archived_by_id`                                                                                                                                                | فهرس (`archived_at`، `updated_at`) |
-| `form_drafts`      | `id`، `form_id` (فريد)، `title`، `description`، `revision`، `updated_by_id`، `created_at`، `updated_at`                                                                                                                           | فهرس على `title`                   |
-| `audit_logs`       | `id`، `actor_id`، `action`، `entity_type`، `entity_id`، `details` (JSON)، `ip_address`، `created_at`                                                                                                                              | بلا أسرار                          |
+| الجدول                   | الأعمدة الرئيسية                                                                                                                                                                                                                  | ملاحظات                            |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `users`                  | `id`، `username` (فريد، صغير)، `display_name`، `password_hash`، `role` (ADMIN/SUPERVISOR)، `is_active`، `failed_login_count`، `locked_until`، `last_login_at`، `password_changed_at`، `created_by_id`، `created_at`، `updated_at` |                                    |
+| `user_permissions`       | (`user_id`، `permission`) مفتاح مركب، `granted_by_id`، `granted_at`                                                                                                                                                               | enum قابل للتوسعة بـ migration     |
+| `sessions`               | `id`، `token_hash` (فريد)، `csrf_token_hash`، `user_id`، `created_at`، `last_seen_at`، `expires_at`، `revoked_at`، `revoked_reason`، `ip_address`، `user_agent`                                                                   | لا يُخزن الرمز نفسه                |
+| `forms`                  | `id`، `public_id` (فريد، عشوائي 128 بت)، `accepting_responses`، `created_by_id`، `created_at`، `updated_at`، `archived_at`، `archived_by_id`                                                                                      | فهرس (`archived_at`، `updated_at`) |
+| `form_drafts`            | `id`، `form_id` (فريد)، `title`، `description`، `revision`، `updated_by_id`، `created_at`، `updated_at`                                                                                                                           | فهرس على `title`                   |
+| `form_versions`          | `id`، `form_id`، `version_number` (فريد مع النموذج)، `title`، `description`، `source_draft_revision`، `publish_key` (فريد مع النموذج)، `published_by_id`، `published_at`                                                          | لا تحديث ولا حذف                   |
+| `form_version_questions` | `id`، `version_id`، `logical_id` (معرّف سؤال المسودة)، `position`، `type`، `title`، `description`، `required`، `settings` (JSON)                                                                                                  |                                    |
+| `form_version_options`   | `id`، `question_id`، `logical_id`، `position`، `label`                                                                                                                                                                            |                                    |
+| `form_responses`         | `id`، `form_id`، `version_id`، `reference_code` (فريد)، `status` (NEW)، `idempotency_key` و`request_hash` (فريد مع النموذج)، `submitted_at`                                                                                       | بلا IP ولا User-Agent              |
+| `form_answers`           | `id`، `response_id`، `question_id` (فريد مع الرد)، `text_value`، `number_value` DECIMAL(23,10)، `date_value` DATE                                                                                                                 | تُحذف مع الرد فقط                  |
+| `form_answer_options`    | (`answer_id`، `option_id`) مفتاح مركب                                                                                                                                                                                             |                                    |
+| `audit_logs`             | `id`، `actor_id`، `action`، `entity_type`، `entity_id`، `details` (JSON)، `ip_address`، `created_at`                                                                                                                              | بلا أسرار                          |
 
 الإجراءات المسجلة: `user.bootstrap_admin`، `user.created`، `user.updated`، `user.permissions_changed`، `user.activated`،
 `user.deactivated`، `user.password_reset`، `auth.login`، `auth.login_failed`، `auth.login_locked`، `auth.logout`،
-`auth.password_changed`، `form.created`، `form.updated` (مع القيم قبل/بعد)، `form.archived`، `form.restored`.
+`auth.password_changed`، `form.created`، `form.updated` (مع القيم قبل/بعد)، `form.archived`، `form.restored`، `form.draft_saved`، `form.published`، `form.responses_opened`، `form.responses_closed`.
+لا يُسجَّل إرسال الردود ولا محتواها.
 تُكتب داخل نفس المعاملة مع التغيير الذي تسجله.

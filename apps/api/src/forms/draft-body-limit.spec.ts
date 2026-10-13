@@ -32,6 +32,9 @@ function storedForm() {
     updatedAt: new Date('2026-10-13T00:00:00Z'),
     archivedAt: null,
     archivedById: null,
+    publicId: null,
+    acceptingResponses: false,
+    versions: [],
     createdBy: { id: 'u', displayName: 'المدير' },
     draft: {
       id: 'd1',

@@ -33,6 +33,12 @@ const draft = {
   title: 'نموذج الاختبار',
   description: null,
   publicationStatus: 'draft',
+  publication: {
+    publicId: null,
+    acceptingResponses: false,
+    latestVersion: null,
+    hasUnpublishedChanges: true,
+  },
   isArchived: false,
   revision: 2,
   createdBy: { id: 'u', displayName: 'مدير' },
