@@ -8,6 +8,8 @@ services:
       MYSQL_USER: ${MYSQL_USER:?MYSQL_USER مطلوب في .env}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD مطلوب في .env}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD مطلوب في .env}
+      MYSQL_TEST_USER: ${MYSQL_TEST_USER:?MYSQL_TEST_USER مطلوب في .env}
+      MYSQL_TEST_PASSWORD: ${MYSQL_TEST_PASSWORD:?MYSQL_TEST_PASSWORD مطلوب في .env}
       TZ: UTC
     command:
       - --character-set-server=utf8mb4

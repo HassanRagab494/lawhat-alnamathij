@@ -10,6 +10,7 @@ import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from '@prisma/client';
 import type { Request, Response } from 'express';
 import type { ApiErrorBody } from './errors';
+import { DRAFT_REQUEST_MAX_BYTES } from '../forms/questions/limits';
 
 /**
  * يحوّل كل الاستثناءات إلى ApiErrorBody. لا يسجّل جسم الطلب أبدًا
@@ -23,7 +24,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
-    const body = this.toBody(exception);
+    const body = this.toBody(exception, req);
 
     if (body.statusCode >= 500) {
       const err = exception instanceof Error ? exception : new Error(String(exception));
@@ -32,7 +33,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     res.status(body.statusCode).json(body);
   }
 
-  private toBody(exception: unknown): ApiErrorBody {
+  private toBody(exception: unknown, req: Request): ApiErrorBody {
     if (exception instanceof ThrottlerException) {
       return {
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -57,6 +58,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
     if (isClientHttpError(exception)) {
       // أخطاء body-parser (http-errors) مثل تجاوز الحجم المسموح.
+      if (exception.status === 413 && DRAFT_PATH_PATTERN.test(req.path)) {
+        return {
+          statusCode: 413,
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `حجم المسودة يتجاوز الحد المسموح (${DRAFT_REQUEST_MAX_BYTES / 1024 / 1024} ميغابايت). لم يُحفظ شيء؛ قلّل المحتوى ثم أعد المحاولة.`,
+        };
+      }
       return { statusCode: exception.status, ...defaultForStatus(exception.status) };
     }
     if (exception instanceof Prisma.PrismaClientInitializationError) {
@@ -73,6 +81,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
   }
 }
+
+const DRAFT_PATH_PATTERN = /^\/api\/forms\/[^/]+\/draft\/?$/;
 
 function isClientHttpError(value: unknown): value is { status: number } {
   if (typeof value !== 'object' || value === null) return false;
@@ -91,7 +101,7 @@ function defaultForStatus(status: number): { code: string; message: string } {
     case 404:
       return { code: 'NOT_FOUND', message: 'المسار المطلوب غير موجود.' };
     case 413:
-      return { code: 'PAYLOAD_TOO_LARGE', message: 'حجم البيانات المرسلة كبير جدًا.' };
+      return { code: 'PAYLOAD_TOO_LARGE', message: 'حجم البيانات المرسلة يتجاوز الحد المسموح.' };
     default:
       return { code: 'HTTP_ERROR', message: 'تعذر إكمال الطلب.' };
   }

@@ -7,6 +7,7 @@ import { Errors } from '../common/errors';
 import { pageMeta } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateFormDto, FormDto, FormListDto, FormListQueryDto, UpdateFormDto } from './dto';
+import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
 
 const formInclude = {
   draft: true,
@@ -14,8 +15,6 @@ const formInclude = {
 } satisfies Prisma.FormInclude;
 
 type FormWithDraft = Prisma.FormGetPayload<{ include: typeof formInclude }>;
-
-class RevisionConflict extends Error {}
 
 const FORM_NOT_FOUND = 'النموذج غير موجود.';
 
@@ -113,7 +112,8 @@ export class FormsService {
     try {
       form = await this.formTransaction(async (tx) => {
         // Always lock parent before draft; the first consistent read follows lock acquisition.
-        await tx.$queryRaw`SELECT id FROM forms WHERE id = ${id} FOR UPDATE`;
+        // هذا المسار يعدّل العنوان والوصف فقط ويحترم revision نفسه، ولا يلمس أسئلة المسودة.
+        await lockForm(tx, id);
         const current = await tx.form.findUnique({ where: { id }, include: formInclude });
         if (!current?.draft) throw Errors.notFound(FORM_NOT_FOUND);
         if (current.archivedAt) {
@@ -180,23 +180,8 @@ export class FormsService {
     return this.setArchived(actor, id, false, meta);
   }
 
-  private async formTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await this.prisma.$transaction(work);
-      } catch (error) {
-        const retryable =
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          (error.code === 'P2034' ||
-            (error.code === 'P2010' && ['1205', '1213'].includes(String(error.meta?.code))));
-        if (!retryable) throw error;
-        if (attempt >= 2)
-          throw Errors.conflict(
-            'WRITE_CONFLICT',
-            'تعذر الحفظ بسبب عملية متزامنة. احتُفظ بتعديلاتك؛ أعد المحاولة.',
-          );
-      }
-    }
+  private formTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return runFormTransaction(this.prisma, work);
   }
 
   private async setArchived(
@@ -206,7 +191,7 @@ export class FormsService {
     meta: RequestMeta,
   ): Promise<FormDto> {
     const form = await this.formTransaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM forms WHERE id = ${id} FOR UPDATE`;
+      await lockForm(tx, id);
       const now = new Date();
       const result = await tx.form.updateMany({
         where: { id, archivedAt: archive ? null : { not: null } },

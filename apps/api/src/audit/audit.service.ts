@@ -18,6 +18,7 @@ export type AuditAction =
   | 'user.deleted'
   | 'form.created'
   | 'form.updated'
+  | 'form.draft_saved'
   | 'form.archived'
   | 'form.restored';
 

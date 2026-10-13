@@ -9,6 +9,7 @@ import {
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
+  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react';
 
@@ -134,6 +135,57 @@ export const TextArea = forwardRef<
 >(function TextArea({ className, ...props }, ref) {
   return <textarea ref={ref} className={cx(inputClasses, 'min-h-32', className)} {...props} />;
 });
+
+export const SelectInput = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
+  function SelectInput({ className, ...props }, ref) {
+    return <select ref={ref} className={cx(inputClasses, 'pe-9', className)} {...props} />;
+  },
+);
+
+/** زر أيقونة صغير مع اسم مقروء لقارئات الشاشة (للنقل والحذف). */
+export function IconButton({
+  label,
+  icon,
+  tone = 'default',
+  className,
+  ...props
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
+  label: string;
+  icon: 'up' | 'down' | 'delete' | 'add';
+  tone?: 'default' | 'danger';
+}) {
+  const paths = {
+    up: 'M12 19V5M5 12l7-7 7 7',
+    down: 'M12 5v14M19 12l-7 7-7-7',
+    delete: 'M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3',
+    add: 'M12 5v14M5 12h14',
+  };
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={cx(
+        'inline-flex size-10 shrink-0 items-center justify-center rounded-xl border transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        tone === 'danger'
+          ? 'border-red-200 bg-white/70 text-red-800 hover:bg-red-50'
+          : 'border-velvet-200 bg-white/70 text-velvet-700 hover:bg-velvet-50',
+        className,
+      )}
+      {...props}
+    >
+      <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d={paths[icon]}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
 
 /* ---------- الحالة والتنبيهات ---------- */
 

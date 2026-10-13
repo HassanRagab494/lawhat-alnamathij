@@ -125,11 +125,60 @@ model FormDraft {
   createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
 
-  form      Form @relation(fields: [formId], references: [id], onDelete: Cascade)
-  updatedBy User @relation("DraftUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  form      Form                @relation(fields: [formId], references: [id], onDelete: Cascade)
+  updatedBy User                @relation("DraftUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  questions FormDraftQuestion[]
 
   @@index([title])
   @@map("form_drafts")
+}
+
+/// أنواع أسئلة المرحلة الثانية. FILE_UPLOAD إعداد ومعاينة فقط دون رفع فعلي.
+enum QuestionType {
+  SHORT_TEXT
+  PARAGRAPH
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  DROPDOWN
+  NUMBER
+  DATE
+  FILE_UPLOAD
+}
+
+/// سؤال في مسودة النموذج. المعرّف ثابت عبر الحفظ؛ الترتيب في position فقط.
+/// settings: إعدادات خاصة بالنوع، يتحقق منها الخادم بمخطط صارم قبل الحفظ (forms/questions/draft-schema.ts).
+model FormDraftQuestion {
+  id          String       @id @default(uuid(7)) @db.Char(36)
+  draftId     String       @map("draft_id") @db.Char(36)
+  position    Int
+  type        QuestionType
+  title       String       @db.VarChar(300)
+  description String?      @db.Text
+  required    Boolean      @default(false)
+  settings    Json
+  createdAt   DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.DateTime(3)
+
+  draft   FormDraft                 @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  options FormDraftQuestionOption[]
+
+  @@index([draftId, position])
+  @@map("form_draft_questions")
+}
+
+/// خيار لسؤال من أنواع الاختيار. المعرّف ثابت عبر الحفظ؛ الترتيب في position فقط.
+model FormDraftQuestionOption {
+  id         String   @id @default(uuid(7)) @db.Char(36)
+  questionId String   @map("question_id") @db.Char(36)
+  position   Int
+  label      String   @db.VarChar(200)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  question FormDraftQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId, position])
+  @@map("form_draft_question_options")
 }
 
 /// سجل العمليات الإدارية. لا يُخزَّن فيه أي كلمة مرور أو رمز جلسة.

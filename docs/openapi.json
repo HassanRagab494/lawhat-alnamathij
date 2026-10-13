@@ -786,6 +786,96 @@
         ]
       }
     },
+    "/api/forms/{id}/draft": {
+      "get": {
+        "operationId": "FormsController_getDraft",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDraftDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "قراءة المسودة الكاملة مع الأسئلة والخيارات مرتبة",
+        "tags": [
+          "forms"
+        ]
+      },
+      "put": {
+        "description": "يحفظ العنوان والوصف والأسئلة والخيارات والترتيب معًا. الأسئلة الغائبة تُحذف، والمعرّفات المرسلة يجب أن تخص هذه المسودة. يزيد revision مرة واحدة إن تغيّر المحتوى. revision قديم ⇒ 409 REVISION_CONFLICT ومعه details.current (المسودة الكاملة الأحدث) دون أي حفظ جزئي.",
+        "operationId": "FormsController_saveDraft",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDraftDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDraftDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED مع fields بمسارات مثل questions.0.settings.maxLength"
+          },
+          "409": {
+            "description": "REVISION_CONFLICT (مع details.current) أو FORM_ARCHIVED أو WRITE_CONFLICT"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "حفظ المسودة كاملة في معاملة واحدة",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
     "/api/dashboard/summary": {
       "get": {
         "operationId": "DashboardController_summary",
@@ -1290,6 +1380,242 @@
         "required": [
           "title",
           "revision"
+        ]
+      },
+      "QuestionOptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "QuestionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SHORT_TEXT",
+              "PARAGRAPH",
+              "SINGLE_CHOICE",
+              "MULTIPLE_CHOICE",
+              "DROPDOWN",
+              "NUMBER",
+              "DATE",
+              "FILE_UPLOAD"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt), maxFileSizeMb (مطلوب، 1-25), maxFiles (مطلوب، 1-10) } — إعداد ومعاينة فقط، لا رفع فعلي"
+          },
+          "options": {
+            "description": "لأنواع الاختيار فقط؛ فارغة لغيرها",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionOptionDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "title",
+          "description",
+          "required",
+          "settings",
+          "options"
+        ]
+      },
+      "FormDraftDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "draft"
+            ],
+            "description": "حالة النشر. في هذه المرحلة كل النماذج مسودات غير منشورة."
+          },
+          "isArchived": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "number",
+            "description": "رقم مراجعة المسودة الحالية"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/UserRefDto"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "questions": {
+            "description": "الأسئلة مرتبة",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "publicationStatus",
+          "isArchived",
+          "revision",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "questions"
+        ]
+      },
+      "SaveOptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "معرّف خيار موجود في السؤال نفسه؛ يُحذف للخيار الجديد"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "SaveQuestionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "معرّف سؤال موجود في هذه المسودة؛ يُحذف للسؤال الجديد"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SHORT_TEXT",
+              "PARAGRAPH",
+              "SINGLE_CHOICE",
+              "MULTIPLE_CHOICE",
+              "DROPDOWN",
+              "NUMBER",
+              "DATE",
+              "FILE_UPLOAD"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 1000
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt), maxFileSizeMb (مطلوب، 1-25), maxFiles (مطلوب، 1-10) } — إعداد ومعاينة فقط، لا رفع فعلي"
+          },
+          "options": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaveOptionDto"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "required",
+          "settings"
+        ]
+      },
+      "SaveDraftDto": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "number",
+            "minimum": 1,
+            "description": "رقم مراجعة المسودة الذي بُني عليه الحفظ"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "questions": {
+            "maxItems": 100,
+            "description": "القائمة الكاملة المرتبة. الأسئلة الغائبة تُحذف.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaveQuestionDto"
+            }
+          }
+        },
+        "required": [
+          "revision",
+          "title",
+          "questions"
         ]
       },
       "FormsSummaryDto": {

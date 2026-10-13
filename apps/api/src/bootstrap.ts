@@ -2,13 +2,19 @@ import { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import { json } from 'express';
 import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/http-exception.filter';
 import { createValidationPipe } from './common/validation';
 import type { AppEnv } from './config/env';
 import { CSRF_HEADER, SESSION_COOKIE } from './auth/tokens';
+import { DRAFT_REQUEST_MAX_BYTES } from './forms/questions/limits';
 
 export const API_PREFIX = 'api';
+/** حد جسم JSON لكل المسارات عدا حفظ المسودة. */
+export const DEFAULT_JSON_LIMIT = '100kb';
+/** مسار حفظ المسودة الكاملة، وحده يقبل حتى DRAFT_REQUEST_MAX_BYTES. */
+export const DRAFT_BODY_PATH = `/${API_PREFIX}/forms/:id/draft`;
 
 /** إعداد مشترك بين التشغيل الفعلي واختبارات التكامل وتصدير OpenAPI. */
 export function configureApp(app: NestExpressApplication, env: AppEnv): void {
@@ -18,7 +24,10 @@ export function configureApp(app: NestExpressApplication, env: AppEnv): void {
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cookieParser());
-  app.useBodyParser('json', { limit: '100kb' });
+  // يُسجَّل محلل المسودة أولًا؛ المحلل العام بعده يتخطى الطلب الذي حُلل جسمه.
+  // الحساب في forms/questions/limits.ts (DRAFT_REQUEST_MAX_BYTES).
+  app.use(DRAFT_BODY_PATH, json({ limit: DRAFT_REQUEST_MAX_BYTES }));
+  app.useBodyParser('json', { limit: DEFAULT_JSON_LIMIT });
   app.enableCors({ origin: env.WEB_ORIGIN, credentials: true });
   app.useGlobalPipes(createValidationPipe());
   app.useGlobalFilters(new AllExceptionsFilter());

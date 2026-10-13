@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { HistoryTracker } from '@/components/history-tracker';
 import { site } from '@/config/site';
 import './globals.css';
 
@@ -16,7 +17,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar-SA" dir="rtl">
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <HistoryTracker />
+        {children}
+      </body>
     </html>
   );
 }

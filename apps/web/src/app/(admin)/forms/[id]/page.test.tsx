@@ -14,6 +14,7 @@ const { form, apiMock, setData } = vi.hoisted(() => ({
     updatedAt: '2026-10-12T00:00:00Z',
     archivedAt: null,
     publicationStatus: 'draft',
+    questions: [] as unknown[],
   },
   apiMock: vi.fn(),
   setData: vi.fn(),
@@ -59,7 +60,13 @@ afterEach(() => {
 it.each([true, false])(
   'preserves inputs until explicit conflict resolution; keepMine=%s',
   async (keepMine) => {
-    const current = { ...form, title: 'winner', description: 'winner description', revision: 2 };
+    const current = {
+      ...form,
+      title: 'winner',
+      description: 'winner description',
+      revision: 2,
+      questions: [],
+    };
     apiMock.mockRejectedValue(new ApiError(409, 'REVISION_CONFLICT', 'conflict', [], { current }));
     render(<FormDetailsPage />);
     const title = screen.getByRole('textbox', { name: /عنوان النموذج/ }) as HTMLInputElement;
@@ -68,14 +75,22 @@ it.each([true, false])(
     fireEvent.change(title, { target: { value: 'my title' } });
     fireEvent.change(description, { target: { value: 'my description' } });
     fireEvent.click(screen.getByText('حفظ التغييرات'));
-    await screen.findByText('الإبقاء على تعديلاتي ومراجعتها');
+    await screen.findByText('الإبقاء على تعديلاتي لمراجعتها');
+    // الحفظ أُرسل كاملًا عبر PUT بـ revision المحمّل
+    expect(apiMock).toHaveBeenCalledWith(
+      '/forms/f/draft',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(apiMock.mock.calls[0]![1].body.revision).toBe(1);
     expect(title.value).toBe('my title');
     expect(description.value).toBe('my description');
-    expect(setData).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByText(keepMine ? 'الإبقاء على تعديلاتي ومراجعتها' : 'تحميل النسخة الحالية'),
+      screen.getByText(
+        keepMine ? 'الإبقاء على تعديلاتي لمراجعتها' : 'تحميل نسخة الخادم (تُلغى تعديلاتي)',
+      ),
     );
-    expect(setData).toHaveBeenCalledWith(current);
+    // المراجعة الأساسية أصبحت نسخة الخادم الأحدث
+    expect(screen.getByText('رقم مراجعة المسودة').nextSibling?.textContent).toBe('2');
     expect(title.value).toBe(keepMine ? 'my title' : 'winner');
     expect(description.value).toBe(keepMine ? 'my description' : 'winner description');
   },

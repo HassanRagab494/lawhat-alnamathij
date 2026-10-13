@@ -7,9 +7,12 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
+  ApiBody,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
@@ -23,6 +26,8 @@ import type { AuthContext } from '../auth/auth-context';
 import { CurrentAuth, RequestMeta, RequestMetaData, RequirePermissions } from '../auth/decorators';
 import { ParseIdPipe } from '../common/id.pipe';
 import { CreateFormDto, FormDto, FormListDto, FormListQueryDto, UpdateFormDto } from './dto';
+import { DraftService } from './draft.service';
+import { FormDraftDto, SaveDraftDto } from './draft-dto';
 import { FormsService } from './forms.service';
 
 const idPipe = new ParseIdPipe('النموذج غير موجود.');
@@ -31,7 +36,10 @@ const idPipe = new ParseIdPipe('النموذج غير موجود.');
 @ApiCookieAuth('session')
 @Controller('forms')
 export class FormsController {
-  constructor(private readonly forms: FormsService) {}
+  constructor(
+    private readonly forms: FormsService,
+    private readonly drafts: DraftService,
+  ) {}
 
   @Get()
   @RequirePermissions(Permission.FORMS_VIEW)
@@ -103,5 +111,39 @@ export class FormsController {
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FormDto> {
     return this.forms.restore(auth, id, meta);
+  }
+
+  @Get(':id/draft')
+  @RequirePermissions(Permission.FORMS_VIEW)
+  @ApiOperation({ summary: 'قراءة المسودة الكاملة مع الأسئلة والخيارات مرتبة' })
+  @ApiOkResponse({ type: FormDraftDto })
+  getDraft(@Param('id', idPipe) id: string): Promise<FormDraftDto> {
+    return this.drafts.getDraft(id);
+  }
+
+  @Put(':id/draft')
+  @RequirePermissions(Permission.FORMS_EDIT)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'حفظ المسودة كاملة في معاملة واحدة',
+    description:
+      'يحفظ العنوان والوصف والأسئلة والخيارات والترتيب معًا. الأسئلة الغائبة تُحذف، والمعرّفات المرسلة يجب أن تخص هذه المسودة. يزيد revision مرة واحدة إن تغيّر المحتوى. revision قديم ⇒ 409 REVISION_CONFLICT ومعه details.current (المسودة الكاملة الأحدث) دون أي حفظ جزئي.',
+  })
+  @ApiBody({ type: SaveDraftDto })
+  @ApiOkResponse({ type: FormDraftDto })
+  @ApiBadRequestResponse({
+    description: 'VALIDATION_FAILED مع fields بمسارات مثل questions.0.settings.maxLength',
+  })
+  @ApiConflictResponse({
+    description: 'REVISION_CONFLICT (مع details.current) أو FORM_ARCHIVED أو WRITE_CONFLICT',
+  })
+  saveDraft(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', idPipe) id: string,
+    // يُتحقق منه بمخطط zod صارم في DraftService (أنواع أسئلة متعددة الأشكال).
+    @Body() body: unknown,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<FormDraftDto> {
+    return this.drafts.saveDraft(auth, id, body, meta);
   }
 }

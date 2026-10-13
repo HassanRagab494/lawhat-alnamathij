@@ -7,7 +7,8 @@
     powershell -ExecutionPolicy Bypass -File scripts/mysql-local.ps1 status
 
   البيانات في %LOCALAPPDATA%\lawha-mysql (خارج المستودع)، والخادم يستمع على 127.0.0.1 فقط.
-  يقرأ MYSQL_DATABASE وMYSQL_USER وMYSQL_PASSWORD وMYSQL_ROOT_PASSWORD وMYSQL_PORT من .env.
+  يقرأ MYSQL_DATABASE وMYSQL_USER وMYSQL_PASSWORD وMYSQL_ROOT_PASSWORD وMYSQL_TEST_USER
+  وMYSQL_TEST_PASSWORD وMYSQL_PORT من .env. قاعدة الاختبار لها حساب مستقل لا يصل إلى القاعدة الأساسية.
   مسار MySQL الافتراضي: C:\Program Files\MySQL\MySQL Server 8.4 (يمكن تغييره بـ MYSQL_HOME).
 #>
 param(
@@ -34,7 +35,7 @@ function Read-DotEnv {
       $values[$Matches[1]] = $Matches[2].Trim().Trim('"')
     }
   }
-  foreach ($key in 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD') {
+  foreach ($key in 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD', 'MYSQL_TEST_USER', 'MYSQL_TEST_PASSWORD') {
     if (-not $values[$key]) { throw "$key مطلوب في .env" }
   }
   if (-not $values['MYSQL_PORT']) { $values['MYSQL_PORT'] = '3306' }
@@ -99,6 +100,8 @@ log-error="$($logFile -replace '\\','/')"
 
     $db = $cfg.MYSQL_DATABASE; $user = $cfg.MYSQL_USER
     $pass = $cfg.MYSQL_PASSWORD -replace "'", "''"
+    $testUser = $cfg.MYSQL_TEST_USER
+    $testPass = $cfg.MYSQL_TEST_PASSWORD -replace "'", "''"
     $rootPass = $cfg.MYSQL_ROOT_PASSWORD -replace "'", "''"
     $sql = @"
 CREATE DATABASE IF NOT EXISTS ``$db`` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -107,13 +110,15 @@ CREATE DATABASE IF NOT EXISTS ``${db}_shadow`` CHARACTER SET utf8mb4 COLLATE utf
 CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$pass';
 CREATE USER IF NOT EXISTS '$user'@'127.0.0.1' IDENTIFIED BY '$pass';
 GRANT ALL PRIVILEGES ON ``$db``.* TO '$user'@'localhost', '$user'@'127.0.0.1';
-GRANT ALL PRIVILEGES ON ``${db}_test``.* TO '$user'@'localhost', '$user'@'127.0.0.1';
+CREATE USER IF NOT EXISTS '$testUser'@'localhost' IDENTIFIED BY '$testPass';
+CREATE USER IF NOT EXISTS '$testUser'@'127.0.0.1' IDENTIFIED BY '$testPass';
+GRANT ALL PRIVILEGES ON ``${db}_test``.* TO '$testUser'@'localhost', '$testUser'@'127.0.0.1';
 GRANT ALL PRIVILEGES ON ``${db}_shadow``.* TO '$user'@'localhost', '$user'@'127.0.0.1';
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$rootPass';
 FLUSH PRIVILEGES;
 "@
     Invoke-Mysql $sql ''
-    Write-Host "تمت التهيئة: القواعد $db و${db}_test و${db}_shadow والمستخدم $user. البيانات في $dataDir"
+    Write-Host "تمت التهيئة: $db و${db}_shadow للمستخدم $user، و${db}_test للحساب المستقل $testUser. البيانات في $dataDir"
   }
   'start' { Start-Server $cfg.MYSQL_ROOT_PASSWORD }
   'stop' {
