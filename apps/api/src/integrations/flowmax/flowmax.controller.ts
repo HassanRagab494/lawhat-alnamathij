@@ -88,15 +88,16 @@ export class FlowmaxController {
   @ApiOperation({
     summary: 'اعتماد الرد وإرساله إلى Flowmax',
     description:
-      'يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE برسائل عربية)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.',
+      'يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.',
   })
   approve(
     @CurrentAuth() auth: AuthContext,
     @Param('id', formIdPipe) formId: string,
     @Param('responseId', responseIdPipe) responseId: string,
+    @Body() body: { excludeFileIds?: unknown } | undefined,
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
-    return this.flowmax.approve(auth, formId, responseId, meta);
+    return this.flowmax.approve(auth, formId, responseId, body ?? {}, meta);
   }
 
   @Post('responses/:responseId/flowmax/retry')
@@ -111,5 +112,35 @@ export class FlowmaxController {
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
     return this.flowmax.retry(auth, formId, responseId, meta);
+  }
+
+  @Post('responses/:responseId/flowmax/publish')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW, Permission.RESPONSES_REVIEW)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'نشر العرض في Flowmax',
+    description:
+      'بعد اكتمال الإرسال فقط، وبقواعد النشر في Flowmax. الفشل يحفظ السبب ويمكن إعادة المحاولة. المشاركة العامة لا تظهر إلا بعد تأكيد النشر.',
+  })
+  publish(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', formIdPipe) formId: string,
+    @Param('responseId', responseIdPipe) responseId: string,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<FlowmaxStateView> {
+    return this.flowmax.publish(auth, formId, responseId, meta);
+  }
+
+  @Post('responses/:responseId/flowmax/refresh')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW, Permission.RESPONSES_REVIEW)
+  @ApiSecurity('csrf')
+  @ApiOperation({ summary: 'تحديث حالة السجل من Flowmax (النشر والرابط)' })
+  refresh(
+    @Param('id', formIdPipe) formId: string,
+    @Param('responseId', responseIdPipe) responseId: string,
+  ): Promise<FlowmaxStateView> {
+    return this.flowmax.refresh(formId, responseId);
   }
 }

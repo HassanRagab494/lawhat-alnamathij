@@ -369,6 +369,8 @@ describe('المرحلة الثالثة: النشر والاستقبال وال�
       acceptingResponses: false,
       versionId: null,
       questions: [],
+      // يُعلن هل تُفحص الملفات ضد البرمجيات الخبيثة (UPLOAD_SCAN_MODE الافتراضي required)
+      fileScanning: true,
     });
   });
 
@@ -388,7 +390,15 @@ describe('المرحلة الثالثة: النشر والاستقبال وال�
     const res = await pub.get(publicId).expect(200);
     v1 = res.body;
     expect(Object.keys(res.body).sort()).toEqual(
-      ['acceptingResponses', 'description', 'publicId', 'questions', 'title', 'versionId'].sort(),
+      [
+        'acceptingResponses',
+        'description',
+        'fileScanning',
+        'publicId',
+        'questions',
+        'title',
+        'versionId',
+      ].sort(),
     );
     expect(res.body.questions).toHaveLength(7);
     expect(Object.keys(res.body.questions[2]).sort()).toEqual(

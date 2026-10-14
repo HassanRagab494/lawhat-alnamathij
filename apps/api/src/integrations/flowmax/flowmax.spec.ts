@@ -11,10 +11,10 @@ import {
   normalizePhone,
   type AnswerInput,
 } from './mapping';
+import { incompatibleMedia } from './media';
 
 const Q = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ctx = {
-  idempotencyKey: 'lawha-11111111-1111-4111-8111-111111111111',
   referenceCode: 'K7Q2-ABCD-EFGH',
   submittedAt: new Date('2026-10-14T10:00:00Z'),
 };
@@ -61,8 +61,11 @@ function offerAnswers(
     11: { type: 'SHORT_TEXT', text: '٢' },
     12: { type: 'SHORT_TEXT', text: 'سارة المالكة' },
     13: { type: 'SHORT_TEXT', text: '0551234567' },
-    14: { type: 'FILE_UPLOAD', files: [{ id: 'img-1', kind: 'PNG', size: 100 }] },
-    15: { type: 'FILE_UPLOAD', files: [{ id: 'vid-1', kind: 'MP4', size: 200 }] },
+    14: {
+      type: 'FILE_UPLOAD',
+      files: [{ id: 'img-1', name: 'واجهة.png', kind: 'PNG', size: 100 }],
+    },
+    15: { type: 'FILE_UPLOAD', files: [{ id: 'vid-1', name: 'جولة.mp4', kind: 'MP4', size: 200 }] },
   };
   return Object.entries({ ...base, ...overrides }).map(([n, a]) => ({
     logicalId: Q(Number(n)),
@@ -73,7 +76,7 @@ function offerAnswers(
 }
 
 describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Flowmax', () => {
-  it('عرض مكتمل ⇒ مسودة عقار بالهللة ورمز المنصة، والمشاركة بلا بيانات المالك', () => {
+  it('عرض مكتمل ⇒ مسودة عقار بالهللة ، والمشاركة بلا بيانات المالك', () => {
     const r = buildFlowmaxRequest(offerConfig, offerAnswers(), ctx);
     expect(r.problems).toEqual([]);
     expect(r.operation).toBe('OFFER');
@@ -88,10 +91,13 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
       bathrooms_count: 2,
       area_sqm: 145.5,
       contact_phone: '+966551234567',
-      platform_code: ctx.idempotencyKey,
       currency: 'SAR',
     });
-    expect(r.media).toEqual({ images: ['img-1'], videos: ['vid-1'] });
+    expect(r.body).not.toHaveProperty('platform_code');
+    expect(r.media).toEqual([
+      { fileId: 'img-1', name: 'واجهة.png', kind: 'PNG', size: 100, role: 'image' },
+      { fileId: 'vid-1', name: 'جولة.mp4', kind: 'MP4', size: 200, role: 'video' },
+    ]);
     const share = JSON.stringify(r.share);
     expect(share).not.toMatch(/سارة|0551234567|966551234567/);
     expect(r.share).toEqual({
@@ -140,7 +146,7 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
     ]);
   });
 
-  it('الطلب يحتاج جوالًا صالحًا وموافقة، ويحمل مفتاح منع التكرار', () => {
+  it('الطلب يحتاج جوالًا صالحًا وموافقة، ولا يحمل مفتاحًا من المتصل (Flowmax يشتقه من مفتاح المصدر)', () => {
     const config = mappingConfigSchema.parse({
       fields: {
         ...offerConfig.fields,
@@ -159,14 +165,14 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
     expect(ok.problems).toEqual([]);
     expect(ok.operation).toBe('REQUEST');
     expect(ok.body).toMatchObject({
-      idempotency_key: ctx.idempotencyKey,
       requester_phone: '+966551234567',
       budget_max_halalas: 85_000_000,
       consent_version: '2026-10',
       criteria: { area_sqm: 145.5, bedrooms_count: 3, bathrooms_count: 2 },
     });
     expect(String(ok.body.intake_consent_evidence)).toContain(ctx.referenceCode);
-    expect(ok.media).toEqual({ images: [], videos: [] });
+    expect(ok.body).not.toHaveProperty('idempotency_key');
+    expect(ok.media).toEqual([]);
 
     const bad = buildFlowmaxRequest(
       config,
@@ -208,6 +214,31 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
   });
 });
 
+describe('incompatibleMedia — حدود Flowmax قبل الاعتماد', () => {
+  const MB = 1024 * 1024;
+  it('يحدد الصور والفيديو التي لا يقبلها Flowmax وسبب كل منها', () => {
+    const out = incompatibleMedia([
+      { fileId: 'a', name: 'كبيرة.jpg', kind: 'JPG', size: 11 * MB, role: 'image' },
+      { fileId: 'b', name: 'ملف.pdf', kind: 'PDF', size: MB, role: 'image' },
+      { fileId: 'c', name: 'ضخم.mp4', kind: 'MP4', size: 101 * MB, role: 'video' },
+      { fileId: 'd', name: 'سليم.png', kind: 'PNG', size: MB, role: 'image' },
+    ]);
+    expect(out.map((m) => m.fileId)).toEqual(['a', 'b', 'c']);
+    expect(out[0]!.reason).toContain('10MB');
+    expect(out[2]!.reason).toContain('100MB');
+  });
+  it('الزائد عن عدد الفيديوهات المسموح يُذكر', () => {
+    const videos = Array.from({ length: 6 }, (_, i) => ({
+      fileId: `v${i}`,
+      name: `v${i}.mp4`,
+      kind: 'MP4' as const,
+      size: MB,
+      role: 'video' as const,
+    }));
+    expect(incompatibleMedia(videos).map((m) => m.fileId)).toEqual(['v5']);
+  });
+});
+
 describe('FlowmaxClient مع خادم Flowmax وهمي', () => {
   let mock: MockFlowmax;
   beforeAll(async () => {
@@ -222,62 +253,54 @@ describe('FlowmaxClient مع خادم Flowmax وهمي', () => {
       timeoutMs: overrides.timeoutMs ?? 2000,
       mediaTimeoutMs: 2000,
     });
+  const OFFERS = '/api/admin/integrations/forms/offers';
 
   it('يرسل الرمز في Authorization فقط ويعيد data', async () => {
-    const data = await client().json<{ id: number }>(
-      'POST',
-      '/api/admin/properties',
-      { title_ar: 'أ', city: 'ب', platform_code: 'k' },
-      'k',
-    );
-    expect(data.id).toBeGreaterThan(0);
+    const data = await client().json<{ id: number; replayed: boolean }>('POST', OFFERS, {
+      source_key: 'lawha:response:c1',
+      title_ar: 'أ',
+    });
+    expect(data.replayed).toBe(false);
     const last = mock.requests.at(-1)!;
     expect(last.auth).toBe(`Bearer ${mock.token}`);
-    expect(last.idempotencyKey).toBe('k');
     expect(last.path).not.toContain(mock.token);
   });
 
-  it('رفض الرمز ⇒ خطأ مؤكد (غير ملتبس) بوصف لا يحمل الرمز', async () => {
-    const error = await client({ token: 'wrong-token-wrong-token-1234' })
-      .json('GET', '/api/admin/properties')
-      .catch((e: FlowmaxError) => e);
-    expect(error).toBeInstanceOf(FlowmaxError);
-    expect((error as FlowmaxError).uncertain).toBe(false);
-    expect((error as FlowmaxError).describe()).toBe('رفض Flowmax صلاحية حساب التكامل (401).');
-    expect(String((error as Error).message)).not.toContain('wrong-token');
+  it('رفض الرمز بوصف لا يحمل الرمز، و409 برسالة واضحة', async () => {
+    const e401 = (await client({ token: 'wrong-token-wrong-token-1234' })
+      .json('GET', '/api/admin/integrations/forms/records/x')
+      .catch((e: unknown) => e)) as FlowmaxError;
+    expect(e401.describe()).toBe('رفض Flowmax صلاحية حساب التكامل (401).');
+    expect(e401.message).not.toContain('wrong-token');
+    const e409 = (await client()
+      .json('POST', OFFERS, { source_key: 'lawha:response:c1', title_ar: 'مختلف' })
+      .catch((e: unknown) => e)) as FlowmaxError;
+    expect(e409.status).toBe(409);
+    expect(e409.code).toBe('integration_key_conflict');
+    expect(e409.describe()).toContain('استُخدم ببيانات مختلفة');
   });
 
-  it('422 ⇒ أسماء الحقول فقط، والمهلة والخطأ 500 ⇒ نتيجة ملتبسة', async () => {
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'http422' });
+  it('422 ⇒ أسماء الحقول أو متطلبات النشر فقط، والمهلة ⇒ timeout', async () => {
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'http422' });
     const e422 = (await client()
-      .json('POST', '/api/admin/properties', {})
+      .json('POST', OFFERS, { source_key: 'lawha:response:c2' })
       .catch((e: unknown) => e)) as FlowmaxError;
-    expect(e422.fields).toEqual(['developer_id']);
     expect(e422.describe()).toBe('رفض Flowmax الحقول: developer_id.');
-    expect(e422.uncertain).toBe(false);
-
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'hang' });
+    const ePublish = (await client()
+      .json('POST', `${OFFERS}/lawha%3Aresponse%3Ac1/publish`, {})
+      .catch((e: unknown) => e)) as FlowmaxError;
+    expect(ePublish.describe()).toBe('متطلبات النشر في Flowmax غير مكتملة: images.');
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'hang' });
     const timeout = (await client({ timeoutMs: 1000 })
-      .json('POST', '/api/admin/properties', {})
+      .json('POST', OFFERS, { source_key: 'lawha:response:c3' })
       .catch((e: unknown) => e)) as FlowmaxError;
     expect(timeout.failure).toBe('timeout');
-    expect(timeout.uncertain).toBe(true);
-
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'http500' });
-    const e500 = (await client()
-      .json('POST', '/api/admin/properties', {})
-      .catch((e: unknown) => e)) as FlowmaxError;
-    expect(e500.uncertain).toBe(true);
   });
 
-  it('يرفع الوسائط multipart بالتدفق باسم مولّد', async () => {
-    const created = await client().json<{ id: number }>('POST', '/api/admin/properties', {
-      title_ar: 'وسائط',
-      city: 'جدة',
-    });
+  it('يرفع المرفق multipart بالتدفق مع مفتاحه وباسم مولّد', async () => {
     const content = Buffer.alloc(4096, 7);
-    await client().upload(`/api/admin/properties/${created.id}/videos`, {
-      field: 'video',
+    await client().upload(`${OFFERS}/lawha%3Aresponse%3Ac1/media`, {
+      fields: { media_key: 'lawha:response:c1:file:v1', kind: 'video' },
       filename: 'media-1.mp4',
       mime: 'video/mp4',
       size: content.length,
@@ -286,8 +309,7 @@ describe('FlowmaxClient مع خادم Flowmax وهمي', () => {
     const req = mock.requests.at(-1)!;
     expect(req.contentType).toMatch(/^multipart\/form-data; boundary=/);
     expect(req.body.toString('latin1')).toContain('filename="media-1.mp4"');
-    expect(req.body.length).toBeGreaterThan(content.length);
-    expect(mock.properties.find((p) => p.id === created.id)!.videos).toBe(1);
+    expect(mock.properties.find((p) => p.sourceKey === 'lawha:response:c1')!.videos).toBe(1);
   });
 });
 
@@ -334,7 +356,7 @@ function fakePrisma(sync: FlowmaxSync, files: Record<string, { kind: string; siz
   };
 }
 
-describe('FlowmaxService.process — إرسال حتمي دون تكرار', () => {
+describe('FlowmaxService.process — إرسال دون تكرار ونتيجة لكل مرفق', () => {
   let mock: MockFlowmax;
   const logs: string[] = [];
   beforeAll(async () => {
@@ -350,34 +372,35 @@ describe('FlowmaxService.process — إرسال حتمي دون تكرار', () 
     await mock.close();
   });
 
-  const env = (autoPublish = false) =>
-    ({
-      FLOWMAX_ENABLED: true,
-      FLOWMAX_PUBLIC_SITE_URL: 'https://flowmax.example/',
-      FLOWMAX_AUTO_PUBLISH: autoPublish,
-    }) as AppEnv;
-  const client = (timeoutMs = 2000) =>
-    new FlowmaxClient({ baseUrl: mock.url, token: mock.token, timeoutMs, mediaTimeoutMs: 2000 });
+  const files = {
+    'img-1': { kind: 'PNG', sizeBytes: 1000 },
+    'vid-1': { kind: 'MP4', sizeBytes: 2000 },
+  };
 
   function newSync(n: number, operation: 'OFFER' | 'REQUEST' = 'OFFER'): FlowmaxSync {
-    const key = `lawha-00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
     return {
       id: `sync-${n}`,
       responseId: `resp-${n}`,
       formId: 'form-1',
       operation,
       status: 'PENDING',
-      idempotencyKey: key,
-      payload:
-        operation === 'OFFER'
-          ? { title_ar: `عقار ${n}`, city: 'الرياض', platform_code: key }
-          : { idempotency_key: key, city: 'الرياض' },
+      sourceKey: `lawha:response:resp-${n}`,
+      payload: { title_ar: `عقار ${n}`, city: 'الرياض' },
       share: { title: `عقار ${n}` },
-      media: { images: ['img-1', 'img-big'], videos: ['vid-1'], sent: [], skipped: [] },
+      media:
+        operation === 'OFFER'
+          ? [
+              { fileId: 'img-1', role: 'image', status: 'PENDING' },
+              { fileId: 'vid-1', role: 'video', status: 'PENDING' },
+            ]
+          : [],
       flowmaxId: null,
       flowmaxRef: null,
-      flowmaxUrl: null,
-      createUncertain: false,
+      detailUrl: null,
+      remoteStatus: null,
+      isPublic: false,
+      publishState: 'NONE',
+      publishError: null,
       publishedAt: null,
       attempts: 0,
       lastError: null,
@@ -389,98 +412,110 @@ describe('FlowmaxService.process — إرسال حتمي دون تكرار', () 
     } as FlowmaxSync;
   }
 
-  const files = {
-    'img-1': { kind: 'PNG', sizeBytes: 1000 },
-    'img-big': { kind: 'JPG', sizeBytes: 11 * 1024 * 1024 }, // أكبر من حد Flowmax للصور ⇒ يُتخطى
-    'vid-1': { kind: 'MP4', sizeBytes: 2000 },
-  };
-
-  function service(sync: FlowmaxSync, opts: { autoPublish?: boolean; timeoutMs?: number } = {}) {
+  function service(sync: FlowmaxSync) {
     const prisma = fakePrisma(sync, files);
-    const storage = { openRead: (key: string) => Readable.from([Buffer.alloc(Number(key))]) };
-    const svc = new FlowmaxService(
-      prisma as never,
-      {} as never,
-      env(opts.autoPublish),
-      storage as never,
-      client(opts.timeoutMs),
-    );
+    const storage = {
+      openRead: (key: string) => Readable.from([Buffer.alloc(Number(key), 3)]),
+      exists: async () => true,
+    };
+    const client = new FlowmaxClient({
+      baseUrl: mock.url,
+      token: mock.token,
+      timeoutMs: 2000,
+      mediaTimeoutMs: 2000,
+    });
+    const env = { FLOWMAX_ENABLED: true } as unknown as AppEnv;
+    const svc = new FlowmaxService(prisma as never, {} as never, env, storage as never, client);
     return { svc, row: () => prisma.rows.get(sync.id)! };
   }
+  const count = (key: string) => mock.properties.filter((p) => p.sourceKey === key).length;
 
-  it('ينشئ العقار ويرفع الصور والفيديو ويحفظ الرابط', async () => {
-    const { svc, row } = service(newSync(1), { autoPublish: true });
+  it('ينشئ السجل وينقل كل مرفق ويحفظ معرّفه، والمسودة ليست عامة', async () => {
+    const { svc, row } = service(newSync(1));
     await svc.process('sync-1');
     const r = row();
     expect(r.status).toBe('SENT');
-    expect(r.flowmaxUrl).toBe(`https://flowmax.example/property/${r.flowmaxId}`);
-    expect(r.publishedAt).toBeInstanceOf(Date);
-    expect(r.media).toMatchObject({ sent: ['img-1', 'vid-1'], skipped: ['img-big'] });
-    const p = mock.properties.find((x) => String(x.id) === r.flowmaxId)!;
-    expect(p).toMatchObject({ images: 1, videos: 1, status: 'Published' });
-  });
-
-  it('ضياع رد الإنشاء ثم إعادة المحاولة ⇒ يجد العقار بمرجعه ولا ينشئ ثانيًا', async () => {
-    const sync = newSync(2);
-    const { svc, row } = service(sync);
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'drop-after-create' });
-    await svc.process('sync-2');
-    expect(row()).toMatchObject({ status: 'FAILED', createUncertain: true, flowmaxId: null });
-    expect(row().lastError).toBe('تعذر الاتصال بـ Flowmax.');
-    expect(mock.properties.filter((p) => p.platform_code === sync.idempotencyKey)).toHaveLength(1);
-
-    row().status = 'PENDING'; // ما يفعله retry()
-    await svc.process('sync-2');
-    expect(row().status).toBe('SENT');
-    expect(row().attempts).toBe(2);
-    expect(mock.properties.filter((p) => p.platform_code === sync.idempotencyKey)).toHaveLength(1);
-  });
-
-  it('فشل الوسائط بعد الإنشاء ⇒ إعادة المحاولة تكمل دون عقار ثانٍ ودون إعادة ما أُرسل', async () => {
-    const sync = newSync(3);
-    const { svc, row } = service(sync);
-    mock.failNext.push({ match: /\/videos$/, mode: 'http500' });
-    await svc.process('sync-3');
-    expect(row()).toMatchObject({ status: 'FAILED', lastError: 'خطأ من Flowmax (500).' });
-    expect(row().flowmaxId).not.toBeNull();
-    const before = mock.requests.filter((r) => r.path.endsWith('/images')).length;
-    row().status = 'PENDING';
-    await svc.process('sync-3');
-    expect(row().status).toBe('SENT');
-    expect(mock.requests.filter((r) => r.path.endsWith('/images')).length).toBe(before);
-    expect(mock.properties.filter((p) => p.platform_code === sync.idempotencyKey)).toHaveLength(1);
-  });
-
-  it('الرفض المؤكد (422) لا يُعلَّم ملتبسًا ويحفظ خطأً مختصرًا', async () => {
-    const { svc, row } = service(newSync(4));
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'http422' });
-    await svc.process('sync-4');
-    expect(row()).toMatchObject({
-      status: 'FAILED',
-      createUncertain: false,
-      lastError: 'رفض Flowmax الحقول: developer_id.',
+    expect(r.isPublic).toBe(false);
+    expect(r.detailUrl).toBe(`https://flowmax.test/property/${r.flowmaxId}`);
+    const media = r.media as unknown as { status: string; externalId: string }[];
+    expect(media.map((m) => m.status)).toEqual(['SENT', 'SENT']);
+    expect(media.every((m) => m.externalId)).toBe(true);
+    expect(mock.properties.find((p) => String(p.id) === r.flowmaxId)).toMatchObject({
+      images: 1,
+      videos: 1,
+      status: 'Draft',
     });
   });
 
-  it('الطلب يُرسل بمفتاح منع التكرار؛ التكرار يعيد الطلب نفسه', async () => {
-    const a = service(newSync(5, 'REQUEST'));
-    await a.svc.process('sync-5');
-    const b = service(newSync(5, 'REQUEST'));
-    await b.svc.process('sync-5');
-    expect(a.row().flowmaxRef).toBe(b.row().flowmaxRef);
-    expect(a.row().flowmaxUrl).toBe(
-      `https://flowmax.example/properties/demands/${a.row().flowmaxRef}`,
-    );
-    expect(mock.demands.size).toBe(1);
+  it('وصول الإنشاء ثم ضياع الاستجابة ⇒ إعادة المحاولة تعيد السجل نفسه', async () => {
+    const sync = newSync(2);
+    const { svc, row } = service(sync);
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'drop-after-create' });
+    await svc.process('sync-2');
+    expect(row()).toMatchObject({ status: 'FAILED', flowmaxId: null });
+    expect(count(sync.sourceKey)).toBe(1);
+    row().status = 'PENDING';
+    await svc.process('sync-2');
+    expect(row().status).toBe('SENT');
+    expect(count(sync.sourceKey)).toBe(1);
   });
 
-  it('لا يُعاد حجز إرسال جارٍ أو مكتمل', async () => {
-    const sync = newSync(6);
+  it('وصول المرفق ثم ضياع الاستجابة ⇒ لا يتكرر المرفق', async () => {
+    const sync = newSync(3);
+    const { svc, row } = service(sync);
+    mock.failNext.push({ match: /\/media$/, mode: 'drop-after-create' });
+    await svc.process('sync-3');
+    expect(row().status).toBe('FAILED');
+    expect(row().lastError).toBe('لم يكتمل نقل 1 من المرفقات؛ أعد المحاولة.');
+    const media = row().media as unknown as { status: string }[];
+    expect(media[0]!.status).toBe('FAILED');
+    row().status = 'PENDING';
+    await svc.process('sync-3');
+    expect(row().status).toBe('SENT');
+    const p = mock.properties.find((x) => x.sourceKey === sync.sourceKey)!;
+    expect([p.images, p.videos]).toEqual([1, 1]);
+  });
+
+  it('فشل مرفق لا يُعرض نجاحًا كاملًا، ونتيجته محفوظة', async () => {
+    const { svc, row } = service(newSync(4));
+    mock.failNext.push({ match: /\/media$/, mode: 'http500' });
+    await svc.process('sync-4');
+    expect(row().status).toBe('FAILED');
+    const media = row().media as unknown as { status: string; error: string | null }[];
+    expect(media.map((m) => m.status)).toEqual(['FAILED', 'SENT']);
+    expect(media[0]!.error).toBe('خطأ من Flowmax (500).');
+  });
+
+  it('409 من Flowmax (محتوى مختلف بالمفتاح نفسه) يظهر خطأً صريحًا', async () => {
+    const sync = newSync(5);
+    const first = service(sync);
+    await first.svc.process('sync-5');
+    const changed = newSync(5);
+    changed.payload = { title_ar: 'عنوان مختلف', city: 'جدة' };
+    const second = service(changed);
+    await second.svc.process('sync-5');
+    expect(second.row().status).toBe('FAILED');
+    expect(second.row().lastError).toContain('(409)');
+    expect(count(sync.sourceKey)).toBe(1);
+  });
+
+  it('الطلب يعيد رابط تفاصيل الطلب نفسه، والتكرار لا ينشئ طلبًا ثانيًا', async () => {
+    const a = service(newSync(6, 'REQUEST'));
+    await a.svc.process('sync-6');
+    const b = service(newSync(6, 'REQUEST'));
+    await b.svc.process('sync-6');
+    expect(a.row().flowmaxRef).toBe(b.row().flowmaxRef);
+    expect(a.row().detailUrl).toBe(`https://flowmax.test/properties/demands/${a.row().flowmaxRef}`);
+    expect(mock.demands.filter((d) => d.sourceKey === 'lawha:response:resp-6')).toHaveLength(1);
+  });
+
+  it('لا يُعاد حجز إرسال مكتمل', async () => {
+    const sync = newSync(7);
     sync.status = 'SENT';
     const { svc } = service(sync);
-    const count = mock.requests.length;
-    await svc.process('sync-6');
-    expect(mock.requests.length).toBe(count);
+    const before = mock.requests.length;
+    await svc.process('sync-7');
+    expect(mock.requests.length).toBe(before);
   });
 
   it('السجلات لا تحمل الرمز ولا بيانات الطلب', () => {

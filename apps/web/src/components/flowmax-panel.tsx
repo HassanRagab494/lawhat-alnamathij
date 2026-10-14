@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import {
+  MEDIA_STATUS_LABELS,
   OPERATION_LABELS,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_TONES,
@@ -11,12 +12,13 @@ import {
   whatsappShareUrl,
   type FlowmaxShare,
   type FlowmaxState,
+  type FlowmaxSync,
 } from '@/lib/flowmax';
 import { Alert, Badge, Button, Card } from './ui';
 
 const POLL_MS = 2000;
 
-/** أزرار المشاركة بعد نجاح الإرسال فقط. النص لا يحتوي بيانات المالك. */
+/** أزرار المشاركة: تظهر فقط بعد تأكيد النشر. النص من حقول عامة مسموحة دون بيانات المالك. */
 export function ShareActions({ share, url }: { share: FlowmaxShare; url: string }) {
   const [note, setNote] = useState<string | null>(null);
   const text = shareText(share, url);
@@ -65,24 +67,55 @@ export function ShareActions({ share, url }: { share: FlowmaxShare; url: string 
   );
 }
 
+function MediaResults({ sync, names }: { sync: FlowmaxSync; names: Record<string, string> }) {
+  if (!sync.media.length) return null;
+  return (
+    <ul className="flex flex-col gap-1 text-xs" aria-label="نتيجة نقل المرفقات">
+      {sync.media.map((m) => (
+        <li key={m.fileId} className="flex flex-wrap justify-between gap-1">
+          <span dir="auto" className="break-all text-ink">
+            {names[m.fileId] ?? m.fileId}
+          </span>
+          <span
+            className={
+              m.status === 'FAILED'
+                ? 'font-semibold text-red-800'
+                : m.status === 'SENT'
+                  ? 'text-emerald-800'
+                  : 'text-muted'
+            }
+          >
+            {MEDIA_STATUS_LABELS[m.status]}
+            {m.error && ` — ${m.error}`}
+            {m.excludedReason && ` — ${m.excludedReason}`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
- * لوحة Flowmax في تفاصيل الرد: الحالة والرابط لمن يعرض الردود، وأزرار الاعتماد وإعادة المحاولة
- * لمن يملك مراجعة الردود فقط (الخادم يفرض الصلاحية نفسها).
+ * لوحة Flowmax في تفاصيل الرد. ثلاث مراحل منفصلة: الاعتماد، ثم إرسال البيانات والمرفقات، ثم النشر.
+ * الحالة والرابط لمن يعرض الردود؛ الاعتماد والنشر وإعادة المحاولة لمن يملك مراجعة الردود (والخادم يفرضها).
  */
 export function FlowmaxPanel({
   formId,
   responseId,
   canReview,
+  fileNames = {},
   onApproved,
 }: {
   formId: string;
   responseId: string;
   canReview: boolean;
+  fileNames?: Record<string, string>;
   onApproved?: () => void;
 }) {
   const base = `/forms/${formId}/responses/${responseId}/flowmax`;
   const [state, setState] = useState<FlowmaxState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [excluded, setExcluded] = useState<string[]>([]);
   const [error, setError] = useState<{ text: string; items: string[] } | null>(null);
 
   const load = useCallback(async () => {
@@ -106,11 +139,12 @@ export function FlowmaxPanel({
     return () => clearTimeout(t);
   }, [status, state, load]);
 
-  async function act(action: 'approve' | 'retry') {
+  async function act(action: 'approve' | 'retry' | 'publish' | 'refresh') {
     setBusy(true);
     setError(null);
     try {
-      setState(await api<FlowmaxState>(`${base}/${action}`, { method: 'POST', body: {} }));
+      const body = action === 'approve' ? { excludeFileIds: excluded } : {};
+      setState(await api<FlowmaxState>(`${base}/${action}`, { method: 'POST', body }));
       if (action === 'approve') onApproved?.();
     } catch (e) {
       setError({
@@ -123,22 +157,74 @@ export function FlowmaxPanel({
   }
 
   if (!state) return null;
-  const { sync } = state;
+  const { sync, precheck } = state;
   if (!sync && (!state.integrationEnabled || !state.mappingEnabled)) return null;
+
+  const incompatible = precheck?.incompatibleMedia ?? [];
+  const unresolved = incompatible.filter((m) => !excluded.includes(m.fileId));
+  const problems = precheck?.problems ?? [];
 
   return (
     <Card className="h-fit p-5">
       <h2 className="mb-3 text-base font-bold text-velvet-900">Flowmax</h2>
       {!sync ? (
         canReview ? (
-          <>
-            <p className="mb-3 text-sm text-muted">
-              الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته إلى Flowmax. لا يُرسل شيء قبل ذلك.
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted">
+              الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته ومرفقاته إلى Flowmax. النشر خطوة
+              منفصلة بعد اكتمال الإرسال.
             </p>
-            <Button className="w-full" onClick={() => void act('approve')} loading={busy}>
+            {problems.length > 0 && (
+              <Alert tone="warning" title="بيانات ناقصة تمنع الاعتماد">
+                <ul className="list-disc ps-5">
+                  {problems.map((p) => (
+                    <li key={p.field}>{p.message}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {incompatible.length > 0 && (
+              <fieldset className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
+                <legend className="px-1 font-semibold text-amber-900">
+                  مرفقات لا يقبلها Flowmax
+                </legend>
+                <p className="mb-2 text-xs text-amber-900">
+                  عالجها، أو استبعدها صراحة من الإرسال (يُسجَّل الاستبعاد باسمك).
+                </p>
+                <ul className="flex flex-col gap-2">
+                  {incompatible.map((m) => (
+                    <li key={m.fileId}>
+                      <label className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-velvet-700"
+                          checked={excluded.includes(m.fileId)}
+                          onChange={(e) =>
+                            setExcluded((list) =>
+                              e.target.checked
+                                ? [...list, m.fileId]
+                                : list.filter((id) => id !== m.fileId),
+                            )
+                          }
+                        />
+                        <span>
+                          استبعاد <span dir="auto">«{m.name}»</span>: {m.reason}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </fieldset>
+            )}
+            <Button
+              className="w-full"
+              onClick={() => void act('approve')}
+              loading={busy}
+              disabled={problems.length > 0 || unresolved.length > 0}
+            >
               اعتماد وإرسال إلى Flowmax
             </Button>
-          </>
+          </div>
         ) : (
           <p className="text-sm text-muted">لم يُعتمد هذا الرد للإرسال إلى Flowmax.</p>
         )
@@ -151,6 +237,11 @@ export function FlowmaxPanel({
               <span className="text-xs text-muted">المحاولات: {sync.attempts}</span>
             )}
           </p>
+          {(sync.status === 'PENDING' || sync.status === 'SENDING') && (
+            <p role="status" className="text-sm text-muted">
+              يُرسل الآن؛ تتحدث الحالة تلقائيًا.
+            </p>
+          )}
           {sync.status === 'FAILED' && (
             <>
               <Alert tone="error">{sync.lastError ?? 'فشل الإرسال.'}</Alert>
@@ -161,40 +252,55 @@ export function FlowmaxPanel({
               )}
             </>
           )}
-          {sync.status === 'SENT' && sync.url && (
-            <>
-              <p className="text-sm">
-                <a
-                  href={sync.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  dir="ltr"
-                  className="break-all font-semibold text-velvet-700 underline"
-                >
-                  {sync.url}
-                </a>
-              </p>
-              {!sync.published && sync.operation === 'OFFER' && (
-                <p className="text-xs text-muted">
-                  أُنشئ العقار مسودة في Flowmax؛ يظهر الرابط للزوار بعد نشره هناك.
-                </p>
-              )}
-              {sync.mediaSkipped > 0 && (
-                <p className="text-xs text-muted">
-                  لم تُرسل {sync.mediaSkipped} من الوسائط لتجاوزها حدود Flowmax.
-                </p>
-              )}
-              {sync.sentAt && (
-                <p className="text-xs text-muted">وقت الإرسال: {formatDateTime(sync.sentAt)}</p>
-              )}
-              {sync.share && <ShareActions share={sync.share} url={sync.url} />}
-            </>
-          )}
-          {(sync.status === 'PENDING' || sync.status === 'SENDING') && (
-            <p role="status" className="text-sm text-muted">
-              يُرسل الآن؛ تتحدث الحالة تلقائيًا.
+          <MediaResults sync={sync} names={fileNames} />
+          {sync.detailUrl && (
+            <p className="text-sm">
+              <span className="block text-xs text-muted">
+                {sync.isPublic ? 'رابط التفاصيل (منشور):' : 'رابط التفاصيل (غير منشور بعد):'}
+              </span>
+              <a
+                href={sync.detailUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                dir="ltr"
+                className="break-all font-semibold text-velvet-700 underline"
+              >
+                {sync.detailUrl}
+              </a>
             </p>
           )}
+          {sync.status === 'SENT' && !sync.isPublic && (
+            <>
+              {sync.publishError && <Alert tone="error">{sync.publishError}</Alert>}
+              {sync.operation === 'OFFER' ? (
+                <>
+                  <p className="text-xs text-muted">
+                    أُرسل العقار مسودة؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
+                  </p>
+                  {canReview && (
+                    <Button onClick={() => void act('publish')} loading={busy}>
+                      {sync.publishState === 'FAILED' ? 'إعادة محاولة النشر' : 'نشر في Flowmax'}
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">
+                    الطلب قيد مراجعة Flowmax؛ تظهر المشاركة بعد نشره هناك.
+                  </p>
+                  {canReview && (
+                    <Button variant="secondary" onClick={() => void act('refresh')} loading={busy}>
+                      تحديث الحالة من Flowmax
+                    </Button>
+                  )}
+                </>
+              )}
+            </>
+          )}
+          {sync.sentAt && (
+            <p className="text-xs text-muted">وقت الإرسال: {formatDateTime(sync.sentAt)}</p>
+          )}
+          {sync.share && sync.detailUrl && <ShareActions share={sync.share} url={sync.detailUrl} />}
         </div>
       )}
       {error && (

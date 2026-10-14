@@ -70,7 +70,11 @@ function AnswerValue({
               className="flex flex-col gap-2 rounded-lg border border-smoke-200 bg-white/70 px-3 py-2 text-sm"
             >
               {downloadBase && (
-                <FilePreview file={f} src={`${downloadBase}/${f.id}?disposition=inline`} />
+                <FilePreview
+                  file={f}
+                  src={`${downloadBase}/${f.id}?disposition=inline`}
+                  downloadHref={`${downloadBase}/${f.id}`}
+                />
               )}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="min-w-0">
@@ -310,6 +314,9 @@ function ResponseDetailView() {
             formId={id}
             responseId={responseId}
             canReview={canReview}
+            fileNames={Object.fromEntries(
+              data.answers.flatMap((a) => (a.files ?? []).map((f) => [f.id, f.name])),
+            )}
             onApproved={reload}
           />
 

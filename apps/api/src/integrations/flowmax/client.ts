@@ -14,6 +14,8 @@ export class FlowmaxError extends Error {
     readonly status?: number,
     /** أسماء حقول التحقق المرفوضة فقط (دون القيم أو الرسائل). */
     readonly fields: string[] = [],
+    /** رمز الخطأ من Flowmax (مثل validation_error أو integration_key_conflict). */
+    readonly code?: string,
   ) {
     super(`flowmax ${failure}${status ? ` ${status}` : ''}`);
   }
@@ -36,8 +38,11 @@ export class FlowmaxError extends Error {
     const s = this.status ?? 0;
     if (s === 401 || s === 403) return `رفض Flowmax صلاحية حساب التكامل (${s}).`;
     if (s === 404) return 'المسار أو السجل غير موجود في Flowmax (404).';
-    if (s === 409) return 'تعارض في Flowmax (409).';
+    if (s === 409) return 'رفض Flowmax مفتاح التكامل لأنه استُخدم ببيانات مختلفة (409).';
     if (s === 422) {
+      if (this.code && /publish/i.test(this.code) && this.fields.length) {
+        return `متطلبات النشر في Flowmax غير مكتملة: ${this.fields.slice(0, 8).join('، ')}.`;
+      }
       return this.fields.length
         ? `رفض Flowmax الحقول: ${this.fields.slice(0, 8).join('، ')}.`
         : 'رفض Flowmax البيانات (422).';
@@ -56,7 +61,8 @@ export interface FlowmaxClientOptions {
 }
 
 export interface MediaUpload {
-  field: 'image' | 'video';
+  /** حقول نصية ترافق الملف (مثل media_key وkind). */
+  fields: Record<string, string>;
   /** اسم آمن مولّد (لا يُرسل الاسم الأصلي للملف). */
   filename: string;
   mime: string;
@@ -103,9 +109,18 @@ export class FlowmaxClient {
       json = undefined;
     }
     if (!res.ok) {
-      const errors = (json as { errors?: Record<string, unknown> } | undefined)?.errors;
-      const fields = errors && typeof errors === 'object' ? Object.keys(errors) : [];
-      throw new FlowmaxError('http', res.status, fields);
+      // شكل أخطاء Flowmax: { error: { code, message, details } }؛ تُحفظ أسماء الحقول أو المتطلبات فقط
+      const error = (json as { error?: { code?: unknown; details?: unknown } } | undefined)?.error;
+      const details = error?.details as Record<string, unknown> | undefined;
+      const missing = details?.missing;
+      const keys =
+        missing && typeof missing === 'object'
+          ? Object.keys(missing)
+          : details && typeof details === 'object'
+            ? Object.keys(details)
+            : [];
+      const code = typeof error?.code === 'string' ? error.code.slice(0, 64) : undefined;
+      throw new FlowmaxError('http', res.status, keys, code);
     }
     if (json === undefined) throw new FlowmaxError('invalid_response', res.status);
     return json;
@@ -138,8 +153,14 @@ export class FlowmaxClient {
   /** رفع ملف وسائط multipart بالتدفق (دون تحميله كاملًا في الذاكرة). */
   async upload<T>(path: string, media: MediaUpload): Promise<T> {
     const boundary = `----lawha${randomBytes(12).toString('hex')}`;
+    const text = Object.entries(media.fields)
+      .map(
+        ([name, value]) =>
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      )
+      .join('');
     const head = Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="${media.field}"; filename="${media.filename}"\r\n` +
+      `${text}--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${media.filename}"\r\n` +
         `Content-Type: ${media.mime}\r\n\r\n`,
     );
     const tail = Buffer.from(`\r\n--${boundary}--\r\n`);

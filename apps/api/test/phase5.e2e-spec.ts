@@ -488,7 +488,8 @@ describe('المرحلة النهائية: رفع الملفات', () => {
       })
       .expect(200);
     expect(Buffer.compare(dl.body as Buffer, samples.pdf())).toBe(0);
-    expect(dl.headers['content-type']).toBe('application/octet-stream');
+    // النوع الحقيقي للملف مع attachment وnosniff (لا يُعرض داخل المتصفح)
+    expect(dl.headers['content-type']).toBe('application/pdf');
     expect(dl.headers['content-disposition']).toBe(
       `attachment; filename="_____.pdf"; filename*=UTF-8''${encodeURIComponent('تقرير.pdf')}`,
     );

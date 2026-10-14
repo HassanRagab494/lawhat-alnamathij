@@ -10,6 +10,7 @@ import {
   type FieldDef,
   type Operation,
 } from './fields';
+import type { MediaCandidate, MediaRole } from './media';
 
 /**
  * الربط بين إجابات النموذج وحقول Flowmax: لكل حقل إما سؤال (بمعرّفه المنطقي الثابت عبر الإصدارات)
@@ -86,7 +87,7 @@ export interface AnswerInput {
   number?: string | null;
   date?: string | null;
   choices?: string[];
-  files?: { id: string; kind: FileKind; size: number }[];
+  files?: { id: string; name: string; kind: FileKind; size: number }[];
 }
 
 export interface Problem {
@@ -104,27 +105,19 @@ export interface ShareInfo {
   priceSar: string | null;
 }
 
-export interface MediaPlan {
-  images: string[];
-  videos: string[];
-}
-
 export interface BuildResult {
   operation: Operation | null;
   body: Record<string, unknown>;
   share: ShareInfo | null;
-  media: MediaPlan;
+  media: MediaCandidate[];
   problems: Problem[];
 }
 
 export interface BuildContext {
-  idempotencyKey: string;
   referenceCode: string;
   submittedAt: Date;
 }
 
-const IMAGE_KINDS = new Set<FileKind>(['JPG', 'PNG', 'WEBP']);
-const VIDEO_KINDS = new Set<FileKind>(['MP4', 'MOV', 'WEBM']);
 const TRUTHY = new Set(['نعم', 'موافق', 'اوافق', 'موافقه', 'yes', 'true', 'agree', '1']);
 
 /** أرقام عربية/فارسية ⇒ لاتينية، وحذف فواصل الآلاف والعملة. */
@@ -185,7 +178,7 @@ export function buildFlowmaxRequest(
   const byId = new Map(answers.map((a) => [a.logicalId, a]));
   const problems: Problem[] = [];
   const values: Record<string, unknown> = {};
-  const media: MediaPlan = { images: [], videos: [] };
+  const media: MediaCandidate[] = [];
 
   const read = (def: FieldDef): unknown => {
     const source = config.fields[def.key];
@@ -266,22 +259,19 @@ export function buildFlowmaxRequest(
   const purpose = (values.listing_purpose as string | undefined) ?? null;
   const category = (values.property_category as string | undefined) ?? null;
   const halalas = values.price ? Math.round(Number(values.price) * 100) : undefined;
-  const files = (key: 'images' | 'videos', kinds: Set<FileKind>) => {
-    const list = (values[key] as AnswerInput['files']) ?? [];
-    const wrong = list.filter((f) => !kinds.has(f.kind));
-    if (wrong.length) {
-      problems.push({
-        field: key,
-        message: `«${FIELD_BY_KEY.get(key)!.label}»: السؤال المربوط يحتوي ملفات من نوع آخر.`,
-      });
-    }
-    return list.filter((f) => kinds.has(f.kind)).map((f) => f.id);
-  };
+  // كل ملفات أسئلة الصور والفيديو تُرشَّح للإرسال؛ ما لا يقبله Flowmax يُعرض للأدمن قبل الاعتماد (media.ts)
+  const files = (key: 'images' | 'videos', role: MediaRole): MediaCandidate[] =>
+    ((values[key] as AnswerInput['files']) ?? []).map((f) => ({
+      fileId: f.id,
+      name: f.name,
+      kind: f.kind,
+      size: f.size,
+      role,
+    }));
 
   let body: Record<string, unknown>;
   if (operation === 'OFFER') {
-    media.images = files('images', IMAGE_KINDS);
-    media.videos = files('videos', VIDEO_KINDS);
+    media.push(...files('images', 'image'), ...files('videos', 'video'));
     const date = values.contract_date as string | undefined;
     body = {
       title_ar: values.title_ar,
@@ -308,8 +298,6 @@ export function buildFlowmaxRequest(
       listing_notes: values.contact_name
         ? `اسم المالك: ${String(values.contact_name)} — رد لوحة النماذج ${ctx.referenceCode}`
         : `رد لوحة النماذج ${ctx.referenceCode}`,
-      // مرجع المنصة الخارجية = مفتاح منع التكرار؛ يُبحث به قبل أي إعادة إنشاء
-      platform_code: ctx.idempotencyKey,
     };
   } else {
     const criteria: Record<string, unknown> = {};
@@ -317,7 +305,6 @@ export function buildFlowmaxRequest(
       if (values[k] !== undefined) criteria[k] = values[k];
     }
     body = {
-      idempotency_key: ctx.idempotencyKey,
       requester_name: values.contact_name,
       requester_phone: values.contact_phone,
       property_category: category,

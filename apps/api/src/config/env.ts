@@ -89,10 +89,6 @@ const envSchema = z.object({
   FLOWMAX_MEDIA_TIMEOUT_MS: blankAsUnset(
     z.coerce.number().int().min(5000).max(900_000).default(300_000),
   ),
-  /** أصل موقع Flowmax العام لبناء روابط العقار (/property/{id}) والطلب (/properties/demands/{ref}). */
-  FLOWMAX_PUBLIC_SITE_URL: blankAsUnset(z.string().trim().url().optional()),
-  /** نشر العقار في Flowmax بعد إنشائه ورفع وسائطه (وإلا يبقى مسودة حتى ينشره فريق Flowmax). */
-  FLOWMAX_AUTO_PUBLISH: blankAsUnset(booleanFromString.default('false')),
 });
 
 export type AppEnv = Omit<z.infer<typeof envSchema>, 'API_DOCS_ENABLED'> & {
@@ -126,11 +122,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     if (trustError) problems.push(`TRUST_PROXY: ${trustError}`);
   }
   if (env.FLOWMAX_ENABLED) {
-    for (const key of [
-      'FLOWMAX_API_BASE_URL',
-      'FLOWMAX_SERVICE_TOKEN',
-      'FLOWMAX_PUBLIC_SITE_URL',
-    ] as const) {
+    for (const key of ['FLOWMAX_API_BASE_URL', 'FLOWMAX_SERVICE_TOKEN'] as const) {
       if (!env[key]) problems.push(`${key}: مطلوب عند FLOWMAX_ENABLED=true`);
     }
     if (

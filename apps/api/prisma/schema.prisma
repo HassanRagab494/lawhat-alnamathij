@@ -490,35 +490,47 @@ model FormFlowmaxMapping {
   @@map("form_flowmax_mappings")
 }
 
+/// حالة نشر السجل في Flowmax؛ منفصلة عن الإرسال (المسودة المرسلة ليست منشورة).
+enum FlowmaxPublishState {
+  NONE
+  REQUESTED
+  PUBLISHED
+  FAILED
+}
+
 /**
- * إرسال رد معتمد إلى Flowmax (واحد لكل رد). idempotencyKey ثابت للرد، فإعادة المحاولة لا تنشئ عقارًا ثانيًا.
+ * سجل التكامل لرد معتمد (واحد لكل رد). sourceKey ثابت لكل رد، وFlowmax يفرض تفرده على مستوى قاعدته
+ * (integration_intakes)، فأي إعادة أو طلب متزامن يعيد السجل نفسه، ومحتوى مختلف بالمفتاح نفسه يُرفض بـ 409.
+ * status: نقل البيانات والمرفقات؛ publishState: النشر؛ isPublic وdetailUrl كما يعيدهما Flowmax.
  * payload: لقطة الحقول وقت الاعتماد (قد تحوي بيانات تواصل خاصة؛ لا تُسجَّل ولا تُعرض في المشاركة).
- * share: لقطة آمنة للمشاركة فقط (عنوان، مدينة، حي، سعر، نوع) بلا بيانات المالك.
+ * share: لقطة من حقول عامة مسموحة فقط. media: نتيجة كل مرفق ومعرّفه الخارجي.
  */
 model FlowmaxSync {
-  id              String            @id @default(uuid(7)) @db.Char(36)
-  responseId      String            @unique @map("response_id") @db.Char(36)
-  formId          String            @map("form_id") @db.Char(36)
-  operation       FlowmaxOperation
-  status          FlowmaxSyncStatus @default(PENDING)
-  idempotencyKey  String            @unique @map("idempotency_key") @db.VarChar(64)
-  payload         Json
-  share           Json
-  /// ملفات الرد المطلوب إرسالها، وما أُرسل منها وما تُخطي (لا تُعاد عند إعادة المحاولة).
-  media           Json
-  flowmaxId       String?           @map("flowmax_id") @db.VarChar(64)
-  flowmaxRef      String?           @map("flowmax_ref") @db.VarChar(100)
-  flowmaxUrl      String?           @map("flowmax_url") @db.VarChar(500)
-  /// طلب الإنشاء أُرسل ولم تصل نتيجته (مهلة/انقطاع): يُبحث عن العقار بمفتاحه قبل أي إنشاء جديد.
-  createUncertain Boolean           @default(false) @map("create_uncertain")
-  publishedAt     DateTime?         @map("published_at") @db.DateTime(3)
-  attempts        Int               @default(0)
-  lastError       String?           @map("last_error") @db.VarChar(300)
-  leaseUntil      DateTime?         @map("lease_until") @db.DateTime(3)
-  sentAt          DateTime?         @map("sent_at") @db.DateTime(3)
-  approvedById    String            @map("approved_by_id") @db.Char(36)
-  approvedAt      DateTime          @default(now()) @map("approved_at") @db.DateTime(3)
-  updatedAt       DateTime          @updatedAt @map("updated_at") @db.DateTime(3)
+  id           String              @id @default(uuid(7)) @db.Char(36)
+  responseId   String              @unique @map("response_id") @db.Char(36)
+  formId       String              @map("form_id") @db.Char(36)
+  operation    FlowmaxOperation
+  status       FlowmaxSyncStatus   @default(PENDING)
+  sourceKey    String              @unique @map("source_key") @db.VarChar(191)
+  payload      Json
+  share        Json
+  media        Json
+  flowmaxId    String?             @map("flowmax_id") @db.VarChar(64)
+  flowmaxRef   String?             @map("flowmax_ref") @db.VarChar(100)
+  /// رابط التفاصيل كما يعيده Flowmax؛ لا يُشارك إلا مع isPublic.
+  detailUrl    String?             @map("detail_url") @db.VarChar(500)
+  remoteStatus String?             @map("remote_status") @db.VarChar(32)
+  isPublic     Boolean             @default(false) @map("is_public")
+  publishState FlowmaxPublishState @default(NONE) @map("publish_state")
+  publishError String?             @map("publish_error") @db.VarChar(300)
+  publishedAt  DateTime?           @map("published_at") @db.DateTime(3)
+  attempts     Int                 @default(0)
+  lastError    String?             @map("last_error") @db.VarChar(300)
+  leaseUntil   DateTime?           @map("lease_until") @db.DateTime(3)
+  sentAt       DateTime?           @map("sent_at") @db.DateTime(3)
+  approvedById String              @map("approved_by_id") @db.Char(36)
+  approvedAt   DateTime            @default(now()) @map("approved_at") @db.DateTime(3)
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
 
   response   FormResponse @relation(fields: [responseId], references: [id], onDelete: Restrict)
   approvedBy User         @relation("FlowmaxApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)

@@ -74,6 +74,18 @@ const upload = (publicId: string, token: string, questionId: string, name: strin
     .set('x-fill-session', token)
     .send(data);
 
+/** يشغّل نسخة جديدة من التطبيق على القاعدة نفسها (لاختبار الاستمرار بعد إعادة التشغيل). */
+async function startApp(): Promise<NestExpressApplication> {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const instance = moduleRef.createNestApplication<NestExpressApplication>({
+    bodyParser: false,
+    logger: ['error'],
+  });
+  configureApp(instance, loadEnv());
+  await instance.init();
+  return instance;
+}
+
 let admin: Session;
 let viewer: Session;
 let downloader: Session;
@@ -96,7 +108,15 @@ async function newSession(): Promise<string> {
 }
 
 /** يرفع ملفات ويرسل ردًا كاملًا (أو ناقص المدينة) ويعيد معرّفه. */
-async function submitResponse(opts: { city?: string; title?: string } = {}) {
+async function submitResponse(
+  opts: {
+    city?: string;
+    title?: string;
+    operation?: string;
+    consent?: string;
+    images?: boolean;
+  } = {},
+) {
   const token = await newSession();
   const png = (await upload(publicId, token, q('الصور').id, 'واجهة.png', samples.png()).expect(201))
     .body.id;
@@ -109,7 +129,10 @@ async function submitResponse(opts: { city?: string; title?: string } = {}) {
   const pdf = (await upload(publicId, token, q('مستند').id, 'صك.pdf', samples.pdf()).expect(201))
     .body.id;
   const answers = [
-    { questionId: q('العملية').id, value: opt('العملية', 'عرض') },
+    { questionId: q('العملية').id, value: opt('العملية', opts.operation ?? 'عرض') },
+    ...(opts.consent
+      ? [{ questionId: q('الموافقة').id, value: opt('الموافقة', opts.consent) }]
+      : []),
     { questionId: q('العنوان').id, value: opts.title ?? 'شقة مطلة على الحديقة' },
     { questionId: q('الوصف').id, value: 'ثلاث غرف وصالة ومطبخ' },
     { questionId: q('نوع العقار').id, value: opt('نوع العقار', 'شقة') },
@@ -119,7 +142,7 @@ async function submitResponse(opts: { city?: string; title?: string } = {}) {
     { questionId: q('السعر').id, value: '850000' },
     { questionId: q('اسم المالك').id, value: 'سارة المالكة' },
     { questionId: q('الجوال').id, value: '0551234567' },
-    { questionId: q('الصور').id, value: [png] },
+    ...(opts.images === false ? [] : [{ questionId: q('الصور').id, value: [png] }]),
     { questionId: q('الفيديو').id, value: [mp4, webm] },
     { questionId: q('مستند').id, value: [pdf] },
   ];
@@ -146,17 +169,10 @@ beforeAll(async () => {
     FLOWMAX_ENABLED: 'true',
     FLOWMAX_API_BASE_URL: mock.url,
     FLOWMAX_SERVICE_TOKEN: mock.token,
-    FLOWMAX_PUBLIC_SITE_URL: 'https://flowmax.test',
     FLOWMAX_TIMEOUT_MS: '2000',
     FLOWMAX_MEDIA_TIMEOUT_MS: '5000',
   });
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = moduleRef.createNestApplication<NestExpressApplication>({
-    bodyParser: false,
-    logger: ['error'],
-  });
-  configureApp(app, loadEnv());
-  await app.init();
+  app = await startApp();
 
   await prisma.user.create({
     data: {
@@ -217,6 +233,7 @@ beforeAll(async () => {
     files('الصور', ['jpg', 'png', 'webp'], 5, 5),
     files('الفيديو', ['mp4', 'mov', 'webm'], 1, 3),
     files('مستند', ['pdf'], 1, 1),
+    { ...choice('الموافقة', ['نعم، أوافق', 'لا']), required: false },
   ];
   await as(admin).put(`/api/forms/${formId}/draft`, { revision: 1, title, questions }).expect(200);
   const draft = (await as(admin).get(`/api/forms/${formId}/draft`).expect(200)).body;
@@ -400,8 +417,11 @@ describe('معاينة المرفقات وتنزيلها عبر المسار ا�
       expect((await as(s).get(fileUrl(files.png!, true)).expect(403)).body.code).toBe('FORBIDDEN');
       await as(s).get(fileUrl(files.mp4!, true)).expect(403);
       await as(s).get(fileUrl(files.pdf!)).expect(403);
+      // طلب مدى لا يتجاوز الصلاحية
+      await as(s).get(fileUrl(files.mp4!, true)).set('Range', 'bytes=0-9').expect(403);
     }
     await request(server()).get(fileUrl(files.png!, true)).expect(401);
+    await request(server()).get(fileUrl(files.mp4!, true)).set('Range', 'bytes=0-9').expect(401);
   });
 
   it('المعاينة تُسجَّل في التدقيق مرة لبداية التشغيل لا لكل جزء', async () => {
@@ -417,9 +437,9 @@ describe('معاينة المرفقات وتنزيلها عبر المسار ا�
   });
 });
 
-describe('ربط Flowmax (خادم وهمي محلي)', () => {
+describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد نقاط التكامل)', () => {
   const flowmax = () => app.get(FlowmaxService);
-  const fields = () => ({
+  const fields = (overrides: Record<string, unknown> = {}) => ({
     operation: { questionId: q('العملية').key },
     title_ar: { questionId: q('العنوان').key },
     description_ar: { questionId: q('الوصف').key },
@@ -432,14 +452,30 @@ describe('ربط Flowmax (خادم وهمي محلي)', () => {
     contact_phone: { questionId: q('الجوال').key },
     images: { questionId: q('الصور').key },
     videos: { questionId: q('الفيديو').key },
+    consent: { questionId: q('الموافقة').key },
+    consent_version: { constant: '2026-10' },
     type_letter: { constant: 'M' },
     developer_id: { constant: '7' },
     mediation_contract_number: { constant: 'MCN-TEST' },
     contract_date: { constant: '2026-03-15' },
     fal_license_number: { constant: 'FAL-TEST' },
+    ...overrides,
   });
+  const saveMapping = (overrides: Record<string, unknown> = {}) =>
+    as(admin)
+      .put(`/api/forms/${formId}/flowmax-mapping`, {
+        enabled: true,
+        config: { fields: fields(overrides) },
+      })
+      .expect(200);
   const flowmaxUrl = (responseId: string, action = '') =>
     `/api/forms/${formId}/responses/${responseId}/flowmax${action}`;
+  const state = async (responseId: string) =>
+    (await as(viewer).get(flowmaxUrl(responseId)).expect(200)).body;
+  const sourceKey = (responseId: string) => `lawha:response:${responseId}`;
+  const offers = (responseId: string) =>
+    mock.properties.filter((p) => p.sourceKey === sourceKey(responseId));
+  const OWNER = /سارة|0551234567|966551234567/;
 
   it('الاختبار لا يلمس Flowmax حقيقيًا', () => {
     expect(process.env.FLOWMAX_API_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
@@ -453,22 +489,24 @@ describe('ربط Flowmax (خادم وهمي محلي)', () => {
     const bad = await as(admin)
       .put(`/api/forms/${formId}/flowmax-mapping`, {
         enabled: true,
-        config: { fields: { ...fields(), images: { questionId: q('العنوان').key } } },
+        config: { fields: fields({ images: { questionId: q('العنوان').key } }) },
       })
       .expect(400);
     expect(bad.body.fields[0]).toEqual({
       field: 'config.fields.images',
       message: 'اختر سؤال رفع ملفات.',
     });
-    const ok = await as(admin)
-      .put(`/api/forms/${formId}/flowmax-mapping`, { enabled: true, config: { fields: fields() } })
-      .expect(200);
+    const ok = await saveMapping();
     expect(ok.body.enabled).toBe(true);
     expect(ok.body.integrationEnabled).toBe(true);
   });
 
   it('رد ناقص البيانات ⇒ 422 برسالة عربية، دون إرسال أو تغيير الحالة', async () => {
     const { responseId } = await submitResponse({ city: '' });
+    const pre = await state(responseId);
+    expect(pre.precheck.problems).toEqual([
+      { field: 'city', message: '«المدينة»: الإجابة مطلوبة لإنشاء العقار.' },
+    ]);
     const before = mock.requests.length;
     const res = await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(422);
     expect(res.body.code).toBe('FLOWMAX_INCOMPLETE');
@@ -482,88 +520,226 @@ describe('ربط Flowmax (خادم وهمي محلي)', () => {
     expect(mock.requests.length).toBe(before);
   });
 
+  it('المرفقات غير المتوافقة تظهر قبل الاعتماد وتمنعه حتى تُستبعد صراحة، ويُسجَّل الاستبعاد', async () => {
+    // سؤال المستندات (PDF) مربوط بالصور ⇒ ملف لا يقبله Flowmax
+    await saveMapping({ images: { questionId: q('مستند').key } });
+    try {
+      const { responseId, files } = await submitResponse({ title: 'عرض بمرفق غير متوافق' });
+      const pre = await state(responseId);
+      expect(pre.precheck.incompatibleMedia).toEqual([
+        { fileId: files.pdf, name: 'صك.pdf', reason: 'Flowmax يقبل صور JPG وPNG وWEBP فقط.' },
+      ]);
+      const blocked = await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(422);
+      expect(blocked.body.code).toBe('FLOWMAX_MEDIA_INCOMPATIBLE');
+      expect(blocked.body.fields[0].message).toBe('«صك.pdf»: Flowmax يقبل صور JPG وPNG وWEBP فقط.');
+      expect(await prisma.flowmaxSync.count({ where: { responseId } })).toBe(0);
+
+      await as(reviewer)
+        .post(flowmaxUrl(responseId, '/approve'), { excludeFileIds: [files.pdf] })
+        .expect(202);
+      await flowmax().whenIdle();
+      const s = (await state(responseId)).sync;
+      expect(s.status).toBe('SENT');
+      expect(s.media.find((m: any) => m.fileId === files.pdf)).toMatchObject({
+        status: 'EXCLUDED',
+        excludedReason: 'Flowmax يقبل صور JPG وPNG وWEBP فقط.',
+      });
+      const audit = await prisma.auditLog.findFirstOrThrow({
+        where: { action: 'response.flowmax_approved', entityId: responseId },
+      });
+      expect((audit.details as any).excludedFileIds).toEqual([files.pdf]);
+    } finally {
+      await saveMapping();
+    }
+  });
+
+  it('طلبا اعتماد متزامنان ⇒ سجل واحد هنا وسجل واحد في Flowmax', async () => {
+    const { responseId } = await submitResponse({ title: 'اعتماد متزامن' });
+    const results = await Promise.all([
+      as(reviewer).post(flowmaxUrl(responseId, '/approve')),
+      as(reviewer).post(flowmaxUrl(responseId, '/approve')),
+      as(reviewer).post(flowmaxUrl(responseId, '/approve')),
+    ]);
+    expect(results.map((r) => r.status)).toEqual([202, 202, 202]);
+    await flowmax().whenIdle();
+    expect(await prisma.flowmaxSync.count({ where: { responseId } })).toBe(1);
+    expect(offers(responseId)).toHaveLength(1);
+  });
+
   let approvedId: string;
 
-  it('الاعتماد يتطلب مراجعة الردود، ثم يرسل العقار ووسائطه ويحفظ الرابط', async () => {
+  it('الاعتماد يرسل البيانات وكل مرفق، والمسودة لا تعرض مشاركة عامة', async () => {
     const { responseId } = await submitResponse({ title: 'شقة النرجس للاختبار' });
     approvedId = responseId;
     await as(viewer).post(flowmaxUrl(responseId, '/approve')).expect(403);
     await as(downloader).post(flowmaxUrl(responseId, '/approve')).expect(403);
-    const res = await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
-    expect(['PENDING', 'SENDING', 'SENT']).toContain(res.body.sync.status);
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
     await flowmax().whenIdle();
 
-    const state = (await as(viewer).get(flowmaxUrl(responseId)).expect(200)).body;
-    expect(state.sync).toMatchObject({
+    const s = (await state(responseId)).sync;
+    expect(s).toMatchObject({
       status: 'SENT',
       operation: 'OFFER',
-      attempts: 1,
-      mediaSent: 3,
+      isPublic: false,
+      publishState: 'NONE',
+      share: null,
     });
-    expect(state.sync.url).toBe(`https://flowmax.test/property/${state.sync.flowmaxId}`);
-    expect(JSON.stringify(state.sync.share)).not.toMatch(/سارة|0551234567|966551234567/);
-    expect(state.sync.share).toMatchObject({
-      title: 'شقة النرجس للاختبار',
-      city: 'الرياض',
-      district: 'النرجس',
-      priceSar: '850000',
-    });
-
-    const created = mock.properties.filter((p) => p.platform_code === `lawha-${responseId}`);
-    expect(created).toHaveLength(1);
-    expect(created[0]).toMatchObject({ images: 1, videos: 2, status: 'Draft' });
-    const createReq = mock.requests.find(
-      (r) =>
-        r.method === 'POST' &&
-        r.path === '/api/admin/properties' &&
-        r.idempotencyKey === `lawha-${responseId}`,
-    )!;
-    expect(JSON.parse(createReq.body.toString('utf8'))).toMatchObject({
-      requested_price: 85_000_000,
-      contact_phone: '+966551234567',
-      property_category: 'apartment',
-      listing_purpose: 'sale',
-    });
+    expect(s.detailUrl).toBe(`https://flowmax.test/property/${s.flowmaxId}`);
+    expect(s.media.map((m: any) => m.status)).toEqual(['SENT', 'SENT', 'SENT']);
+    expect(offers(responseId)[0]).toMatchObject({ images: 1, videos: 2, status: 'Draft' });
+    expect(JSON.stringify(s)).not.toMatch(OWNER);
+    const sent = offers(responseId)[0]!.payload;
+    expect(sent).toMatchObject({ requested_price: 85_000_000, contact_phone: '+966551234567' });
     expect(
       (await prisma.formResponse.findUniqueOrThrow({ where: { id: responseId } })).status,
     ).toBe('ACCEPTED');
   });
 
-  it('تكرار الاعتماد لا ينشئ عقارًا ثانيًا', async () => {
-    const count = mock.properties.length;
-    const again = await as(reviewer).post(flowmaxUrl(approvedId, '/approve')).expect(202);
-    await flowmax().whenIdle();
-    expect(again.body.sync.status).toBe('SENT');
-    expect(mock.properties.length).toBe(count);
+  it('تكرار الاعتماد وإعادة المحاولة لا ينشئان سجلًا ثانيًا', async () => {
+    await as(reviewer).post(flowmaxUrl(approvedId, '/approve')).expect(202);
     await as(reviewer).post(flowmaxUrl(approvedId, '/retry')).expect(202);
     await flowmax().whenIdle();
-    expect(mock.properties.length).toBe(count);
+    expect(offers(approvedId)).toHaveLength(1);
   });
 
-  it('فشل Flowmax ⇒ حالة فشل وخطأ مختصر، وإعادة المحاولة تكمل دون تكرار', async () => {
-    const { responseId } = await submitResponse({ title: 'شقة تفشل أولًا' });
-    mock.failNext.push({ match: /POST \/api\/admin\/properties$/, mode: 'http500' });
+  it('النشر منفصل: بعده فقط تظهر المشاركة برابط التفاصيل الذي أعاده Flowmax ودون بيانات المالك', async () => {
+    await as(viewer).post(flowmaxUrl(approvedId, '/publish')).expect(403);
+    const res = await as(reviewer).post(flowmaxUrl(approvedId, '/publish')).expect(200);
+    expect(res.body.sync).toMatchObject({ publishState: 'PUBLISHED', isPublic: true });
+    expect(res.body.sync.share).toMatchObject({
+      title: 'شقة النرجس للاختبار',
+      city: 'الرياض',
+      district: 'النرجس',
+      priceSar: '850000',
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(OWNER);
+    expect(offers(approvedId)[0]!.status).toBe('Published');
+  });
+
+  it('فشل النشر يحفظ المعرّف والسبب ولا يعرض مشاركة، ويمكن إعادة المحاولة', async () => {
+    const { responseId } = await submitResponse({ title: 'عرض بلا صور', images: false });
     await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
     await flowmax().whenIdle();
-    const failed = (await as(viewer).get(flowmaxUrl(responseId)).expect(200)).body.sync;
-    expect(failed).toMatchObject({
-      status: 'FAILED',
-      lastError: 'خطأ من Flowmax (500).',
-      url: null,
+    const res = await as(reviewer).post(flowmaxUrl(responseId, '/publish')).expect(200);
+    expect(res.body.sync).toMatchObject({
+      status: 'SENT',
+      publishState: 'FAILED',
+      publishError: 'متطلبات النشر في Flowmax غير مكتملة: images.',
+      isPublic: false,
       share: null,
     });
+    expect(res.body.sync.flowmaxId).toBeTruthy();
+    const again = await as(reviewer).post(flowmaxUrl(responseId, '/publish')).expect(200);
+    expect(again.body.sync.publishState).toBe('FAILED');
+  });
 
+  it('وصول الإنشاء ثم ضياع الاستجابة لا يكرر السجل عند إعادة المحاولة', async () => {
+    const { responseId } = await submitResponse({ title: 'ضياع استجابة الإنشاء' });
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'drop-after-create' });
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
+    await flowmax().whenIdle();
+    expect((await state(responseId)).sync).toMatchObject({
+      status: 'FAILED',
+      lastError: 'تعذر الاتصال بـ Flowmax.',
+    });
+    expect(offers(responseId)).toHaveLength(1);
+    await as(reviewer).post(flowmaxUrl(responseId, '/retry')).expect(202);
+    await flowmax().whenIdle();
+    expect((await state(responseId)).sync.status).toBe('SENT');
+    expect(offers(responseId)).toHaveLength(1);
+  });
+
+  it('وصول المرفق ثم ضياع الاستجابة لا يكرره، وفشل المرفق لا يظهر نجاحًا كاملًا', async () => {
+    const { responseId } = await submitResponse({ title: 'ضياع استجابة مرفق' });
+    mock.failNext.push({ match: /\/media$/, mode: 'drop-after-create' });
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
+    await flowmax().whenIdle();
+    const failed = (await state(responseId)).sync;
+    expect(failed.status).toBe('FAILED');
+    expect(failed.lastError).toBe('لم يكتمل نقل 1 من المرفقات؛ أعد المحاولة.');
+    expect(failed.media.map((m: any) => m.status)).toEqual(['FAILED', 'SENT', 'SENT']);
+    expect(failed.share).toBeNull();
     await as(viewer).post(flowmaxUrl(responseId, '/retry')).expect(403);
     await as(reviewer).post(flowmaxUrl(responseId, '/retry')).expect(202);
     await flowmax().whenIdle();
-    const sent = (await as(viewer).get(flowmaxUrl(responseId)).expect(200)).body.sync;
-    expect(sent).toMatchObject({ status: 'SENT', attempts: 2, lastError: null });
-    expect(mock.properties.filter((p) => p.platform_code === `lawha-${responseId}`)).toHaveLength(
-      1,
-    );
+    expect((await state(responseId)).sync.status).toBe('SENT');
+    expect(offers(responseId)[0]).toMatchObject({ images: 1, videos: 2 });
   });
 
-  it('السجلات والتدقيق لا تحمل رمز التكامل', async () => {
+  it('محتوى مختلف بالمفتاح نفسه يُرفض من Flowmax بـ 409 ويظهر خطأً صريحًا', async () => {
+    const { responseId } = await submitResponse({ title: 'مفتاح بمحتوى مختلف' });
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
+    await flowmax().whenIdle();
+    // تعديل اللقطة المحفوظة يحاكي إعادة استخدام المفتاح ببيانات مختلفة
+    const sync = await prisma.flowmaxSync.findUniqueOrThrow({ where: { responseId } });
+    await prisma.flowmaxSync.update({
+      where: { id: sync.id },
+      data: {
+        status: 'FAILED',
+        payload: { ...(sync.payload as object), requested_price: 1 },
+      },
+    });
+    await as(reviewer).post(flowmaxUrl(responseId, '/retry')).expect(202);
+    await flowmax().whenIdle();
+    const s = (await state(responseId)).sync;
+    expect(s.status).toBe('FAILED');
+    expect(s.lastError).toBe('رفض Flowmax مفتاح التكامل لأنه استُخدم ببيانات مختلفة (409).');
+    expect(offers(responseId)).toHaveLength(1);
+  });
+
+  it('الطلب العقاري يعيد رابط تفاصيل الطلب نفسه، والمشاركة بعد نشره في Flowmax فقط', async () => {
+    const { responseId } = await submitResponse({
+      title: 'طلب شقة',
+      operation: 'طلب',
+      consent: 'نعم، أوافق',
+    });
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
+    await flowmax().whenIdle();
+    const s = (await state(responseId)).sync;
+    expect(s).toMatchObject({ status: 'SENT', operation: 'REQUEST', isPublic: false, share: null });
+    expect(s.detailUrl).toBe(`https://flowmax.test/properties/demands/${s.flowmaxRef}`);
+    expect(s.detailUrl).not.toMatch(/\/property\//);
+    const demand = mock.demands.find((d) => d.sourceKey === sourceKey(responseId))!;
+    expect(demand.payload).not.toHaveProperty('idempotency_key');
+    expect(
+      (await as(reviewer).post(flowmaxUrl(responseId, '/publish')).expect(409)).body.code,
+    ).toBe('FLOWMAX_PUBLISH_NOT_SUPPORTED');
+
+    mock.publishDemand(demand.reference);
+    const refreshed = await as(reviewer).post(flowmaxUrl(responseId, '/refresh')).expect(200);
+    expect(refreshed.body.sync).toMatchObject({ isPublic: true, publishState: 'PUBLISHED' });
+    expect(refreshed.body.sync.share).toMatchObject({ operation: 'REQUEST', city: 'الرياض' });
+    expect(JSON.stringify(refreshed.body)).not.toMatch(OWNER);
+    expect(mock.demands.filter((d) => d.sourceKey === sourceKey(responseId))).toHaveLength(1);
+  });
+
+  it('حالة التكامل تبقى بعد إعادة تشغيل التطبيق، والإرسال المنقطع يصبح قابلًا لإعادة المحاولة', async () => {
+    const { responseId } = await submitResponse({ title: 'انقطاع أثناء الإرسال' });
+    // إرسال يتعلق دون رد ثم يُغلق التطبيق قبل اكتماله (انهيار العملية)
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'hang' });
+    await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
+    await new Promise((r) => setTimeout(r, 300));
+    await prisma.flowmaxSync.updateMany({ where: { responseId }, data: { status: 'SENDING' } });
+    await flowmax().whenIdle();
+    await prisma.flowmaxSync.updateMany({ where: { responseId }, data: { status: 'SENDING' } });
+    await app.close();
+    app = await startApp();
+
+    const after = (await state(responseId)).sync;
+    expect(after.status).toBe('FAILED');
+    expect(after.lastError).toBe('انقطع الإرسال قبل اكتماله؛ أعد المحاولة.');
+    await as(reviewer).post(flowmaxUrl(responseId, '/retry')).expect(202);
+    await flowmax().whenIdle();
+    expect((await state(responseId)).sync.status).toBe('SENT');
+    expect(offers(responseId)).toHaveLength(1);
+    // السجل المرسل والمنشور قبل إعادة التشغيل باقٍ كما هو
+    expect((await state(approvedId)).sync).toMatchObject({
+      publishState: 'PUBLISHED',
+      isPublic: true,
+    });
+  });
+
+  it('السجلات والتدقيق وسجل التكامل لا تحمل رمز التكامل', async () => {
     const logs = await prisma.auditLog.findMany({
       where: { action: { startsWith: 'response.flowmax' } },
     });

@@ -14,27 +14,59 @@ export interface FlowmaxShare {
   priceSar: string | null;
 }
 
+export type FlowmaxPublishState = 'NONE' | 'REQUESTED' | 'PUBLISHED' | 'FAILED';
+export type FlowmaxMediaStatus = 'PENDING' | 'SENT' | 'FAILED' | 'EXCLUDED';
+
+export interface FlowmaxMedia {
+  fileId: string;
+  role: 'image' | 'video';
+  status: FlowmaxMediaStatus;
+  error: string | null;
+  excludedReason: string | null;
+}
+
 export interface FlowmaxSync {
   status: FlowmaxSyncStatus;
   operation: FlowmaxOperation;
   flowmaxId: string | null;
   flowmaxRef: string | null;
-  url: string | null;
+  /** رابط التفاصيل كما أعاده Flowmax؛ لا يعني أنه منشور. */
+  detailUrl: string | null;
+  remoteStatus: string | null;
+  isPublic: boolean;
+  publishState: FlowmaxPublishState;
+  publishError: string | null;
   sentAt: string | null;
   approvedAt: string;
   lastError: string | null;
   attempts: number;
-  published: boolean;
-  mediaSent: number;
-  mediaSkipped: number;
+  media: FlowmaxMedia[];
+  /** بعد تأكيد Flowmax أن السجل منشور وظاهر فقط. */
   share: FlowmaxShare | null;
+}
+
+export interface IncompatibleMedia {
+  fileId: string;
+  name: string;
+  reason: string;
 }
 
 export interface FlowmaxState {
   integrationEnabled: boolean;
   mappingEnabled: boolean;
   sync: FlowmaxSync | null;
+  precheck: {
+    problems: { field: string; message: string }[];
+    incompatibleMedia: IncompatibleMedia[];
+  } | null;
 }
+
+export const MEDIA_STATUS_LABELS: Record<FlowmaxMediaStatus, string> = {
+  PENDING: 'بانتظار النقل',
+  SENT: 'نُقل',
+  FAILED: 'فشل النقل',
+  EXCLUDED: 'مستبعد',
+};
 
 export const SYNC_STATUS_LABELS: Record<FlowmaxSyncStatus, string> = {
   PENDING: 'بانتظار الإرسال',

@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
-import { Prisma, type FileKind, type FlowmaxSync, type ResponseStatus } from '@prisma/client';
+import { Prisma, type FlowmaxSync, type ResponseStatus } from '@prisma/client';
 import { AuditService } from '../../audit/audit.service';
 import type { AuthContext } from '../../auth/auth-context';
 import type { RequestMeta } from '../../auth/decorators';
@@ -17,18 +17,16 @@ import {
   mappingConfigSchema,
   type AnswerInput,
   type MappingConfig,
-  type MediaPlan,
+  type Problem,
   type ShareInfo,
 } from './mapping';
+import { incompatibleMedia, type IncompatibleMedia, type MediaItem } from './media';
 
 export const FLOWMAX_CLIENT = Symbol('FLOWMAX_CLIENT');
 
 /** مدة حجز الإرسال؛ بعدها يُعتبر الإرسال منقطعًا (انهيار العملية) ويمكن إعادة المحاولة. */
 const LEASE_MS = 30 * 60 * 1000;
-/** حدود Flowmax لوسائط العقار (property-listing-fields.md وإعداد الفيديو الافتراضي). */
-const FLOWMAX_IMAGE_MAX = 10 * 1024 * 1024;
-const FLOWMAX_VIDEO_MAX = 100 * 1024 * 1024;
-const EXT: Partial<Record<FileKind, string>> = {
+const EXT: Record<string, string> = {
   JPG: 'jpg',
   PNG: 'png',
   WEBP: 'webp',
@@ -36,10 +34,23 @@ const EXT: Partial<Record<FileKind, string>> = {
   MOV: 'mov',
   WEBM: 'webm',
 };
+const API = '/api/admin/integrations/forms';
 
-interface MediaState extends MediaPlan {
-  sent: string[];
-  skipped: string[];
+/** ما يعيده Flowmax لسجل العرض أو الطلب (بلا بيانات تواصل). */
+interface FlowmaxRecord {
+  id: number | string;
+  reference?: string | null;
+  status?: string | null;
+  is_public?: boolean;
+  detail_url?: string | null;
+}
+
+export interface FlowmaxMediaView {
+  fileId: string;
+  role: MediaItem['role'];
+  status: MediaItem['status'];
+  error: string | null;
+  excludedReason: string | null;
 }
 
 export interface FlowmaxSyncView {
@@ -47,22 +58,32 @@ export interface FlowmaxSyncView {
   operation: FlowmaxSync['operation'];
   flowmaxId: string | null;
   flowmaxRef: string | null;
-  url: string | null;
+  /** رابط التفاصيل كما أعاده Flowmax (للإدارة)؛ لا يعني أنه منشور. */
+  detailUrl: string | null;
+  remoteStatus: string | null;
+  isPublic: boolean;
+  publishState: FlowmaxSync['publishState'];
+  publishError: string | null;
   sentAt: string | null;
   approvedAt: string;
   lastError: string | null;
   attempts: number;
-  published: boolean;
-  mediaSent: number;
-  mediaSkipped: number;
-  /** بيانات المشاركة الآمنة (بلا بيانات المالك)؛ بعد نجاح الإرسال فقط. */
+  media: FlowmaxMediaView[];
+  /** بيانات المشاركة: فقط بعد تأكيد Flowmax أن السجل منشور وظاهر. */
   share: ShareInfo | null;
+}
+
+export interface FlowmaxPrecheck {
+  problems: Problem[];
+  incompatibleMedia: IncompatibleMedia[];
 }
 
 export interface FlowmaxStateView {
   integrationEnabled: boolean;
   mappingEnabled: boolean;
   sync: FlowmaxSyncView | null;
+  /** قبل الاعتماد: الحقول الناقصة والمرفقات غير المتوافقة مع Flowmax. */
+  precheck: FlowmaxPrecheck | null;
 }
 
 export interface MappingView {
@@ -74,12 +95,21 @@ export interface MappingView {
   updatedAt: string | null;
 }
 
-const idempotencyKeyFor = (responseId: string) => `lawha-${responseId}`;
+/** مفتاح المصدر الثابت للرد؛ Flowmax يفرض تفرده مع هوية حساب التكامل. */
+export const sourceKeyFor = (responseId: string) => `lawha:response:${responseId}`;
+export const mediaKeyFor = (sourceKey: string, fileId: string) => `${sourceKey}:file:${fileId}`;
+
+const json = <T>(value: T) => value as unknown as Prisma.InputJsonValue;
+const describe = (error: unknown) =>
+  error instanceof FlowmaxError ? error.describe() : 'خطأ داخلي أثناء الاتصال بـ Flowmax.';
 
 /**
- * تكامل Flowmax: لا يُرسل أي رد قبل اعتماد صريح من مستخدم يملك مراجعة الردود. الاعتماد يحفظ لقطة
- * الطلب وحالة pending ثم يُرسل في الخلفية؛ مفتاح منع التكرار ثابت لكل رد، ومعرّف العقار يُحفظ فور
- * إنشائه، فلا تُنشئ إعادة المحاولة عقارًا ثانيًا. السجلات لا تحمل الرمز ولا بيانات المالك.
+ * تكامل Flowmax بثلاث مراحل منفصلة:
+ * 1. الاعتماد (مراجعة الردود): لقطة الطلب وحالة «مقبول»، بعد التحقق من الحقول والمرفقات.
+ * 2. الإرسال (في الخلفية): إنشاء السجل في Flowmax ثم كل مرفق بمفتاح مستقل؛ Flowmax يعيد السجل نفسه
+ *    لأي إعادة أو طلب متزامن، فلا تكرار.
+ * 3. النشر (للعروض): بقواعد النشر في Flowmax. المشاركة العامة فقط بعد تأكيد أنه منشور وظاهر.
+ * السجلات لا تحمل الرمز ولا بيانات المالك.
  */
 @Injectable()
 export class FlowmaxService implements OnModuleInit {
@@ -94,11 +124,10 @@ export class FlowmaxService implements OnModuleInit {
     @Inject(FLOWMAX_CLIENT) private readonly client: FlowmaxClient | null,
   ) {}
 
-  /** إرسال انقطع بانهيار العملية السابقة ⇒ فشل قابل لإعادة المحاولة (مع البحث قبل أي إنشاء). */
+  /** ما انقطع بانهيار العملية السابقة يتحول إلى فشل قابل لإعادة المحاولة (Flowmax يعيد السجل نفسه). */
   async onModuleInit(): Promise<void> {
-    // دون تفعيل الربط لا إرسال؛ الاستعادة تتم عند أول تشغيل بالربط مفعّلًا
     if (!this.integrationEnabled) return;
-    const { count } = await this.prisma.flowmaxSync.updateMany({
+    const sending = await this.prisma.flowmaxSync.updateMany({
       where: { status: { in: ['SENDING', 'PENDING'] } },
       data: {
         status: 'FAILED',
@@ -106,11 +135,13 @@ export class FlowmaxService implements OnModuleInit {
         leaseUntil: null,
       },
     });
-    await this.prisma.flowmaxSync.updateMany({
-      where: { status: 'FAILED', flowmaxId: null, attempts: { gt: 0 } },
-      data: { createUncertain: true },
+    const publishing = await this.prisma.flowmaxSync.updateMany({
+      where: { publishState: 'REQUESTED' },
+      data: { publishState: 'FAILED', publishError: 'انقطع طلب النشر قبل اكتماله؛ أعد المحاولة.' },
     });
-    if (count) this.logger.warn(`recovered ${count} interrupted flowmax sync(s)`);
+    if (sending.count || publishing.count) {
+      this.logger.warn(`recovered ${sending.count + publishing.count} interrupted flowmax sync(s)`);
+    }
   }
 
   get integrationEnabled(): boolean {
@@ -120,6 +151,16 @@ export class FlowmaxService implements OnModuleInit {
   /** ينتظر انتهاء كل الإرسالات الجارية (للاختبارات والإغلاق). */
   async whenIdle(): Promise<void> {
     while (this.inflight.size) await Promise.allSettled([...this.inflight.values()]);
+  }
+
+  private assertEnabled(): void {
+    if (!this.integrationEnabled) {
+      throw new AppError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'FLOWMAX_DISABLED',
+        'ربط Flowmax غير مفعّل على هذا الخادم.',
+      );
+    }
   }
 
   // ---------- الربط ----------
@@ -225,7 +266,7 @@ export class FlowmaxService implements OnModuleInit {
     return this.getMapping(formId);
   }
 
-  // ---------- الاعتماد والإرسال ----------
+  // ---------- الحالة والتحقق المسبق ----------
 
   private async responseAnswers(formId: string, responseId: string) {
     const r = await this.prisma.formResponse.findFirst({
@@ -248,7 +289,7 @@ export class FlowmaxService implements OnModuleInit {
             options: { select: { option: { select: { label: true, position: true } } } },
             files: {
               orderBy: { createdAt: 'asc' },
-              select: { id: true, kind: true, sizeBytes: true },
+              select: { id: true, originalName: true, kind: true, sizeBytes: true },
             },
           },
         },
@@ -269,10 +310,27 @@ export class FlowmaxService implements OnModuleInit {
           .slice()
           .sort((x, y) => x.option.position - y.option.position)
           .map((o) => o.option.label),
-        files: a?.files.map((f) => ({ id: f.id, kind: f.kind, size: f.sizeBytes })),
+        files: a?.files.map((f) => ({
+          id: f.id,
+          name: f.originalName,
+          kind: f.kind,
+          size: f.sizeBytes,
+        })),
       };
     });
     return { response: r, answers };
+  }
+
+  private async build(formId: string, responseId: string) {
+    const mapping = await this.prisma.formFlowmaxMapping.findUnique({ where: { formId } });
+    if (!mapping?.enabled) return null;
+    const config = mappingConfigSchema.parse(mapping.config);
+    const { response, answers } = await this.responseAnswers(formId, responseId);
+    const built = buildFlowmaxRequest(config, answers, {
+      referenceCode: response.referenceCode,
+      submittedAt: response.submittedAt,
+    });
+    return { built, incompatible: incompatibleMedia(built.media) };
   }
 
   async state(formId: string, responseId: string): Promise<FlowmaxStateView> {
@@ -281,61 +339,97 @@ export class FlowmaxService implements OnModuleInit {
       select: { id: true, flowmaxSync: true, form: { select: { flowmaxMapping: true } } },
     });
     if (!response) throw Errors.notFound('الرد غير موجود.');
+    const mappingEnabled = response.form.flowmaxMapping?.enabled ?? false;
+    let precheck: FlowmaxPrecheck | null = null;
+    if (!response.flowmaxSync && this.integrationEnabled && mappingEnabled) {
+      const result = await this.build(formId, responseId);
+      if (result) {
+        precheck = { problems: result.built.problems, incompatibleMedia: result.incompatible };
+      }
+    }
     return {
       integrationEnabled: this.integrationEnabled,
-      mappingEnabled: response.form.flowmaxMapping?.enabled ?? false,
+      mappingEnabled,
       sync: response.flowmaxSync ? this.view(response.flowmaxSync) : null,
+      precheck,
     };
   }
 
+  // ---------- الاعتماد ----------
+
   /**
-   * اعتماد الرد وإرساله: يتحقق من اكتمال البيانات المطلوبة (وإلا 422 برسائل عربية)، ثم يحفظ لقطة
-   * الطلب ويغيّر حالة الرد إلى «مقبول» في معاملة واحدة، ثم يبدأ الإرسال. تكرار الاعتماد يعيد الحالة نفسها.
+   * اعتماد الرد: يتحقق من الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن المرفقات غير المتوافقة مع Flowmax
+   * (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم يستبعدها الأدمن صراحة)، ثم يحفظ اللقطة ويغيّر الحالة إلى «مقبول»
+   * في معاملة واحدة ويبدأ الإرسال. تكرار الاعتماد أو اعتمادان متزامنان ينتجان سجلًا واحدًا.
    */
   async approve(
     actor: AuthContext,
     formId: string,
     responseId: string,
+    options: { excludeFileIds?: unknown },
     meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
-    if (!this.integrationEnabled) {
-      throw new AppError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        'FLOWMAX_DISABLED',
-        'ربط Flowmax غير مفعّل على هذا الخادم.',
-      );
-    }
+    this.assertEnabled();
     const existing = await this.prisma.flowmaxSync.findUnique({ where: { responseId } });
     if (existing) {
       if (existing.formId !== formId) throw Errors.notFound('الرد غير موجود.');
       return this.state(formId, responseId);
     }
-    const mapping = await this.prisma.formFlowmaxMapping.findUnique({ where: { formId } });
-    if (!mapping?.enabled) {
+    const exclude = options.excludeFileIds ?? [];
+    if (!Array.isArray(exclude) || !exclude.every((v) => typeof v === 'string')) {
+      throw Errors.validation([{ field: 'excludeFileIds', message: 'قائمة الملفات غير صالحة.' }]);
+    }
+    const result = await this.build(formId, responseId);
+    if (!result) {
       throw Errors.conflict(
         'FLOWMAX_MAPPING_MISSING',
         'لم يُفعّل ربط هذا النموذج مع Flowmax بعد. اضبط الربط من إعدادات النموذج.',
       );
     }
-    const config = mappingConfigSchema.parse(mapping.config);
-    const { response, answers } = await this.responseAnswers(formId, responseId);
-    const key = idempotencyKeyFor(responseId);
-    const built = buildFlowmaxRequest(config, answers, {
-      idempotencyKey: key,
-      referenceCode: response.referenceCode,
-      submittedAt: response.submittedAt,
-    });
+    const { built, incompatible } = result;
     if (built.problems.length || !built.operation || !built.share) {
       throw new AppError(
         HttpStatus.UNPROCESSABLE_ENTITY,
         'FLOWMAX_INCOMPLETE',
-        'لا يمكن اعتماد الرد: بيانات مطلوبة لإنشاء العقار ناقصة أو غير صالحة.',
+        'لا يمكن اعتماد الرد: بيانات مطلوبة لإنشاء السجل ناقصة أو غير صالحة.',
         {
           fields: built.problems.map((p) => ({ field: `flowmax.${p.field}`, message: p.message })),
         },
       );
     }
-    const media: MediaState = { ...built.media, sent: [], skipped: [] };
+    const excluded = new Set(exclude as string[]);
+    const known = new Set(built.media.map((m) => m.fileId));
+    if ([...excluded].some((id) => !known.has(id))) {
+      throw Errors.validation([
+        { field: 'excludeFileIds', message: 'أحد الملفات المستبعدة لا يخص هذا الرد.' },
+      ]);
+    }
+    const blocking = incompatible.filter((m) => !excluded.has(m.fileId));
+    if (blocking.length) {
+      throw new AppError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'FLOWMAX_MEDIA_INCOMPATIBLE',
+        'لا يمكن اعتماد الرد: مرفقات لا يقبلها Flowmax. عالجها أو استبعدها صراحة قبل الاعتماد.',
+        {
+          fields: blocking.map((m) => ({
+            field: `flowmax.media.${m.fileId}`,
+            message: `«${m.name}»: ${m.reason}`,
+          })),
+        },
+      );
+    }
+    const reasons = new Map(incompatible.map((m) => [m.fileId, m.reason]));
+    const media: MediaItem[] = built.media.map((m) =>
+      excluded.has(m.fileId)
+        ? {
+            fileId: m.fileId,
+            role: m.role,
+            status: 'EXCLUDED',
+            excludedReason: reasons.get(m.fileId) ?? 'استبعده المراجع.',
+            excludedById: actor.userId,
+          }
+        : { fileId: m.fileId, role: m.role, status: 'PENDING' },
+    );
     let created: FlowmaxSync | null = null;
     try {
       created = await runFormTransaction(this.prisma, async (tx) => {
@@ -348,10 +442,10 @@ export class FlowmaxService implements OnModuleInit {
             responseId,
             formId,
             operation: built.operation!,
-            idempotencyKey: key,
-            payload: built.body as Prisma.InputJsonObject,
-            share: built.share as unknown as Prisma.InputJsonObject,
-            media: media as unknown as Prisma.InputJsonObject,
+            sourceKey: sourceKeyFor(responseId),
+            payload: json(built.body),
+            share: json(built.share),
+            media: json(media),
             approvedById: actor.userId,
           },
         });
@@ -360,7 +454,7 @@ export class FlowmaxService implements OnModuleInit {
           await tx.formResponseStatusChange.create({
             data: {
               responseId,
-              fromStatus: current.status as ResponseStatus,
+              fromStatus: current.status,
               toStatus: 'ACCEPTED',
               changedById: actor.userId,
             },
@@ -372,7 +466,12 @@ export class FlowmaxService implements OnModuleInit {
             action: 'response.flowmax_approved',
             entityType: 'response',
             entityId: responseId,
-            details: { formId, operation: built.operation, from: current.status },
+            details: {
+              formId,
+              operation: built.operation,
+              from: current.status,
+              excludedFileIds: [...excluded],
+            },
             ipAddress: meta.ipAddress,
           },
           tx,
@@ -389,24 +488,15 @@ export class FlowmaxService implements OnModuleInit {
     return this.state(formId, responseId);
   }
 
-  /** إعادة المحاولة بعد الفشل فقط؛ تستكمل من حيث توقفت (لا تنشئ عقارًا ثانيًا ولا تعيد الوسائط المرسلة). */
+  /** إعادة المحاولة بعد الفشل فقط؛ تستكمل من حيث توقفت دون تكرار في Flowmax. */
   async retry(
     actor: AuthContext,
     formId: string,
     responseId: string,
     meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
-    if (!this.integrationEnabled) {
-      throw new AppError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        'FLOWMAX_DISABLED',
-        'ربط Flowmax غير مفعّل على هذا الخادم.',
-      );
-    }
-    const sync = await this.prisma.flowmaxSync.findUnique({ where: { responseId } });
-    if (!sync || sync.formId !== formId) {
-      throw Errors.conflict('FLOWMAX_NOT_APPROVED', 'هذا الرد لم يُعتمد للإرسال إلى Flowmax.');
-    }
+    this.assertEnabled();
+    const sync = await this.syncOf(formId, responseId);
     const { count } = await this.prisma.flowmaxSync.updateMany({
       where: { id: sync.id, status: 'FAILED' },
       data: { status: 'PENDING' },
@@ -424,6 +514,104 @@ export class FlowmaxService implements OnModuleInit {
     }
     return this.state(formId, responseId);
   }
+
+  private async syncOf(formId: string, responseId: string): Promise<FlowmaxSync> {
+    const sync = await this.prisma.flowmaxSync.findUnique({ where: { responseId } });
+    if (!sync || sync.formId !== formId) {
+      throw Errors.conflict('FLOWMAX_NOT_APPROVED', 'هذا الرد لم يُعتمد للإرسال إلى Flowmax.');
+    }
+    return sync;
+  }
+
+  // ---------- النشر وتحديث الحالة ----------
+
+  /**
+   * نشر العرض في Flowmax بقواعد النشر فيه. منفصل عن الإرسال: لا يُطلب إلا بعد اكتمال نقل البيانات
+   * والمرفقات. الفشل يحفظ السبب ويُبقي المعرّف، ويمكن إعادة المحاولة.
+   */
+  async publish(
+    actor: AuthContext,
+    formId: string,
+    responseId: string,
+    meta: RequestMeta,
+  ): Promise<FlowmaxStateView> {
+    this.assertEnabled();
+    const sync = await this.syncOf(formId, responseId);
+    if (sync.operation !== 'OFFER') {
+      throw Errors.conflict(
+        'FLOWMAX_PUBLISH_NOT_SUPPORTED',
+        'نشر الطلبات يتم من مراجعة Flowmax؛ استخدم «تحديث الحالة» لمعرفة نشره.',
+      );
+    }
+    if (sync.status !== 'SENT') {
+      throw Errors.conflict(
+        'FLOWMAX_NOT_SENT',
+        'لا يمكن النشر قبل اكتمال إرسال البيانات وكل المرفقات.',
+      );
+    }
+    const { count } = await this.prisma.flowmaxSync.updateMany({
+      where: { id: sync.id, publishState: { in: ['NONE', 'FAILED'] } },
+      data: { publishState: 'REQUESTED', publishError: null },
+    });
+    if (!count) return this.state(formId, responseId);
+    try {
+      const record = await this.client!.json<FlowmaxRecord>(
+        'POST',
+        `${API}/offers/${encodeURIComponent(sync.sourceKey)}/publish`,
+        {},
+      );
+      await this.save(sync.id, {
+        ...this.recordFields(record),
+        publishState: 'PUBLISHED',
+        publishedAt: new Date(),
+        publishError: record.is_public ? null : 'نُشر في Flowmax لكنه غير ظاهر في الكتالوج العام.',
+      });
+    } catch (error) {
+      this.logFailure(sync.id, 'publish', error);
+      await this.save(sync.id, {
+        publishState: 'FAILED',
+        publishError: describe(error).slice(0, 300),
+      });
+    }
+    await this.audit.record({
+      actorId: actor.userId,
+      action: 'response.flowmax_published',
+      entityType: 'response',
+      entityId: responseId,
+      details: { formId },
+      ipAddress: meta.ipAddress,
+    });
+    return this.state(formId, responseId);
+  }
+
+  /** يقرأ حالة السجل من Flowmax (مثلًا بعد نشر الطلب من مراجعة Flowmax). */
+  async refresh(formId: string, responseId: string): Promise<FlowmaxStateView> {
+    this.assertEnabled();
+    const sync = await this.syncOf(formId, responseId);
+    if (!sync.flowmaxId) return this.state(formId, responseId);
+    try {
+      const record = await this.client!.json<FlowmaxRecord>(
+        'GET',
+        `${API}/records/${encodeURIComponent(sync.sourceKey)}`,
+      );
+      await this.save(sync.id, {
+        ...this.recordFields(record),
+        ...(record.is_public && sync.publishState !== 'PUBLISHED'
+          ? { publishState: 'PUBLISHED', publishedAt: new Date(), publishError: null }
+          : {}),
+      });
+    } catch (error) {
+      this.logFailure(sync.id, 'refresh', error);
+      throw new AppError(
+        HttpStatus.BAD_GATEWAY,
+        'FLOWMAX_UNAVAILABLE',
+        `تعذر تحديث الحالة من Flowmax. ${describe(error)}`,
+      );
+    }
+    return this.state(formId, responseId);
+  }
+
+  // ---------- الإرسال ----------
 
   private kick(id: string): void {
     if (this.inflight.has(id)) return;
@@ -456,168 +644,126 @@ export class FlowmaxService implements OnModuleInit {
     return this.prisma.flowmaxSync.update({ where: { id }, data });
   }
 
+  private recordFields(record: FlowmaxRecord): Prisma.FlowmaxSyncUpdateInput {
+    return {
+      flowmaxId: String(record.id),
+      flowmaxRef: record.reference ? String(record.reference).slice(0, 100) : null,
+      detailUrl: record.detail_url ? String(record.detail_url).slice(0, 500) : null,
+      remoteStatus: record.status ? String(record.status).slice(0, 32) : null,
+      isPublic: record.is_public === true,
+    };
+  }
+
+  private logFailure(id: string, step: string, error: unknown): void {
+    const fx = error instanceof FlowmaxError ? error : null;
+    this.logger.warn(
+      `flowmax sync ${id} ${step} failed: ${fx ? `${fx.failure} ${fx.status ?? ''} ${fx.code ?? ''}` : (error as Error).name}`,
+    );
+  }
+
   async process(id: string): Promise<void> {
     const sync = await this.claim(id);
     if (!sync) return;
-    const client = this.client;
     try {
-      if (!client) throw new FlowmaxError('network');
-      if (sync.operation === 'OFFER') await this.sendOffer(client, sync);
-      else await this.sendRequest(client, sync);
-    } catch (error) {
-      const fx = error instanceof FlowmaxError ? error : null;
-      const message = fx ? fx.describe() : 'خطأ داخلي أثناء الإرسال.';
-      this.logger.warn(
-        `flowmax sync ${id} failed: ${fx ? `${fx.failure} ${fx.status ?? ''}` : (error as Error).name}`,
+      if (!this.client) throw new FlowmaxError('network');
+      // Flowmax يعيد السجل نفسه لمفتاح المصدر نفسه، فإعادة هذا الطلب آمنة دائمًا
+      const record = await this.client.json<FlowmaxRecord>(
+        'POST',
+        `${API}/${sync.operation === 'OFFER' ? 'offers' : 'demands'}`,
+        { source_key: sync.sourceKey, ...(sync.payload as Record<string, unknown>) },
       );
-      await this.save(id, { status: 'FAILED', lastError: message.slice(0, 300), leaseUntil: null });
-    }
-  }
-
-  private async sendOffer(client: FlowmaxClient, sync: FlowmaxSync): Promise<void> {
-    const payload = sync.payload as Record<string, unknown>;
-    let flowmaxId = sync.flowmaxId;
-    if (!flowmaxId && sync.createUncertain) {
-      // محاولة سابقة أُرسلت دون نتيجة: يُبحث عن العقار بمرجع المنصة (platform_code) قبل أي إنشاء
-      const found = await this.findOffer(client, payload, sync.idempotencyKey);
-      if (found) {
-        flowmaxId = String(found.id);
+      await this.save(sync.id, this.recordFields(record));
+      const failed = sync.operation === 'OFFER' ? await this.sendMedia(this.client, sync) : [];
+      if (failed.length) {
         await this.save(sync.id, {
-          flowmaxId,
-          flowmaxRef: found.property_code ?? null,
-          createUncertain: false,
+          status: 'FAILED',
+          leaseUntil: null,
+          lastError: `لم يكتمل نقل ${failed.length} من المرفقات؛ أعد المحاولة.`,
         });
+        return;
       }
-    }
-    if (!flowmaxId) {
-      let created: { id: number | string; property_code?: string };
-      try {
-        created = await client.json('POST', '/api/admin/properties', payload, sync.idempotencyKey);
-      } catch (error) {
-        if (error instanceof FlowmaxError && error.uncertain) {
-          await this.save(sync.id, { createUncertain: true });
-        }
-        throw error;
-      }
-      flowmaxId = String(created.id);
-      // يُحفظ المعرّف فورًا: أي فشل لاحق (الوسائط) لا يؤدي إلى إنشاء ثانٍ
       await this.save(sync.id, {
-        flowmaxId,
-        flowmaxRef: created.property_code ?? null,
-        createUncertain: false,
+        status: 'SENT',
+        sentAt: new Date(),
+        lastError: null,
+        leaseUntil: null,
+      });
+    } catch (error) {
+      this.logFailure(id, 'send', error);
+      await this.save(id, {
+        status: 'FAILED',
+        lastError: describe(error).slice(0, 300),
+        leaseUntil: null,
       });
     }
-    await this.sendMedia(client, sync, flowmaxId);
-    let publishedAt = sync.publishedAt;
-    if (this.env.FLOWMAX_AUTO_PUBLISH && !publishedAt) {
-      await client.json(
-        'POST',
-        `/api/admin/properties/${encodeURIComponent(flowmaxId)}/publish`,
-        {},
-      );
-      publishedAt = new Date();
-      await this.save(sync.id, { publishedAt });
-    }
-    await this.save(sync.id, {
-      status: 'SENT',
-      sentAt: new Date(),
-      lastError: null,
-      leaseUntil: null,
-      flowmaxUrl: `${this.siteUrl()}/property/${encodeURIComponent(flowmaxId)}`,
-    });
   }
 
-  private async findOffer(
-    client: FlowmaxClient,
-    payload: Record<string, unknown>,
-    key: string,
-  ): Promise<{ id: number | string; property_code?: string } | null> {
-    const q = new URLSearchParams({
-      search: String(payload.title_ar ?? ''),
-      city: String(payload.city ?? ''),
-      per_page: '100',
-    });
-    const list = await client.json<
-      { id: number | string; property_code?: string; platform_code?: string }[]
-    >('GET', `/api/admin/properties?${q.toString()}`);
-    return (Array.isArray(list) ? list : []).find((p) => p.platform_code === key) ?? null;
-  }
-
-  private async sendMedia(client: FlowmaxClient, sync: FlowmaxSync, flowmaxId: string) {
-    const media = sync.media as unknown as MediaState;
-    const done = new Set([...media.sent, ...media.skipped]);
-    const queue = [
-      ...media.images.map((id) => ({ id, field: 'image' as const, max: FLOWMAX_IMAGE_MAX })),
-      ...media.videos.map((id) => ({ id, field: 'video' as const, max: FLOWMAX_VIDEO_MAX })),
-    ].filter((m) => !done.has(m.id));
-    let n = media.sent.length;
-    for (const item of queue) {
+  /** ينقل كل مرفق غير مرسل بمفتاحه الخاص، ويحفظ نتيجة كل مرفق. يعيد المرفقات التي فشلت. */
+  private async sendMedia(client: FlowmaxClient, sync: FlowmaxSync): Promise<MediaItem[]> {
+    const media = (sync.media as unknown as MediaItem[]).map((m) => ({ ...m }));
+    let n = 0;
+    for (const item of media) {
+      n++;
+      if (item.status === 'SENT' || item.status === 'EXCLUDED') continue;
       const file = await this.prisma.uploadedFile.findFirst({
-        where: { id: item.id, responseId: sync.responseId },
+        where: { id: item.fileId, responseId: sync.responseId },
         select: { id: true, storageKey: true, kind: true, sizeBytes: true },
       });
-      if (!file || file.sizeBytes > item.max || !EXT[file.kind]) {
-        media.skipped.push(item.id);
-        await this.save(sync.id, { media: media as unknown as Prisma.InputJsonObject });
-        continue;
+      try {
+        if (!file || !(await this.storage.exists(file.storageKey))) {
+          throw new Error('missing');
+        }
+        const result = await client.upload<{ id: number | string }>(
+          `${API}/offers/${encodeURIComponent(sync.sourceKey)}/media`,
+          {
+            fields: { media_key: mediaKeyFor(sync.sourceKey, item.fileId), kind: item.role },
+            filename: `media-${n}.${EXT[file.kind] ?? 'bin'}`,
+            mime: MIME_BY_KIND[file.kind],
+            size: file.sizeBytes,
+            stream: this.storage.openRead(file.storageKey),
+          },
+        );
+        item.status = 'SENT';
+        item.externalId = String(result.id);
+        item.error = null;
+      } catch (error) {
+        this.logFailure(sync.id, `media ${item.fileId}`, error);
+        item.status = 'FAILED';
+        item.error =
+          error instanceof FlowmaxError
+            ? error.describe().slice(0, 200)
+            : 'الملف غير متاح في التخزين.';
       }
-      n++;
-      await client.upload(
-        `/api/admin/properties/${encodeURIComponent(flowmaxId)}/${item.field === 'image' ? 'images' : 'videos'}`,
-        {
-          field: item.field,
-          filename: `media-${n}.${EXT[file.kind]}`,
-          mime: MIME_BY_KIND[file.kind],
-          size: file.sizeBytes,
-          stream: this.storage.openRead(file.storageKey),
-        },
-      );
-      media.sent.push(item.id);
-      await this.save(sync.id, { media: media as unknown as Prisma.InputJsonObject });
+      await this.save(sync.id, { media: json(media) });
     }
-  }
-
-  private async sendRequest(client: FlowmaxClient, sync: FlowmaxSync): Promise<void> {
-    // Flowmax يدعم idempotency_key للطلبات: إعادة الإرسال تعيد الطلب الأصلي دون إنشاء ثانٍ
-    const created = await client.json<{ id: number | string; reference?: string }>(
-      'POST',
-      '/api/admin/property-demands',
-      sync.payload,
-      sync.idempotencyKey,
-    );
-    const ref = created.reference ?? null;
-    await this.save(sync.id, {
-      status: 'SENT',
-      flowmaxId: String(created.id),
-      flowmaxRef: ref,
-      sentAt: new Date(),
-      lastError: null,
-      leaseUntil: null,
-      createUncertain: false,
-      flowmaxUrl: ref ? `${this.siteUrl()}/properties/demands/${encodeURIComponent(ref)}` : null,
-    });
-  }
-
-  private siteUrl(): string {
-    return (this.env.FLOWMAX_PUBLIC_SITE_URL ?? '').replace(/\/+$/, '');
+    return media.filter((m) => m.status === 'FAILED');
   }
 
   private view(sync: FlowmaxSync): FlowmaxSyncView {
-    const media = sync.media as unknown as MediaState;
+    const media = (sync.media as unknown as MediaItem[]) ?? [];
+    const shareable = sync.status === 'SENT' && sync.isPublic && Boolean(sync.detailUrl);
     return {
       status: sync.status,
       operation: sync.operation,
       flowmaxId: sync.flowmaxId,
       flowmaxRef: sync.flowmaxRef,
-      url: sync.status === 'SENT' ? sync.flowmaxUrl : null,
+      detailUrl: sync.detailUrl,
+      remoteStatus: sync.remoteStatus,
+      isPublic: sync.isPublic,
+      publishState: sync.publishState,
+      publishError: sync.publishError,
       sentAt: sync.sentAt?.toISOString() ?? null,
       approvedAt: sync.approvedAt.toISOString(),
       lastError: sync.status === 'FAILED' ? sync.lastError : null,
       attempts: sync.attempts,
-      published: Boolean(sync.publishedAt),
-      mediaSent: media.sent?.length ?? 0,
-      mediaSkipped: media.skipped?.length ?? 0,
-      share: sync.status === 'SENT' ? (sync.share as unknown as ShareInfo) : null,
+      media: media.map((m) => ({
+        fileId: m.fileId,
+        role: m.role,
+        status: m.status,
+        error: m.error ?? null,
+        excludedReason: m.excludedReason ?? null,
+      })),
+      share: shareable ? (sync.share as unknown as ShareInfo) : null,
     };
   }
 }

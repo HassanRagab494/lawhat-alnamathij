@@ -30,6 +30,7 @@ export type AuditAction =
   | 'response.file_previewed'
   | 'response.flowmax_approved'
   | 'response.flowmax_retried'
+  | 'response.flowmax_published'
   | 'form.flowmax_mapping_updated';
 
 export interface AuditEntry {
