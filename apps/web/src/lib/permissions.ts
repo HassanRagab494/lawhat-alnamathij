@@ -37,7 +37,7 @@ export const PERMISSION_OPTIONS: { key: Permission; label: string; hint: string 
   {
     key: 'RESPONSES_FILES_DOWNLOAD',
     label: 'تنزيل ملفات الردود',
-    hint: 'تنزيل الملفات التي أرفقها المرسلون (بعد فحصها).',
+    hint: 'تنزيل الملفات التي أرفقها المرسلون في ردودهم.',
   },
 ];
 

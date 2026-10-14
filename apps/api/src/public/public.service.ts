@@ -70,6 +70,7 @@ export class PublicService {
       title: version.title,
       description: version.description,
       acceptingResponses: accepting,
+      fileScanning: this.uploads.malwareScanning,
       versionId: accepting ? version.id : null,
       questions: accepting
         ? version.questions.map((q) => ({

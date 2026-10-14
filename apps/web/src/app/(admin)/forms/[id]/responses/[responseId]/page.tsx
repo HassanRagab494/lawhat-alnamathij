@@ -72,6 +72,14 @@ function AnswerValue({
                   {f.name}
                 </span>
                 <span className="ms-2 text-xs text-muted">{formatBytes(f.size)}</span>
+                {f.malwareScanned === false && (
+                  <span
+                    className="ms-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900"
+                    title="قُبل بعد التحقق من النوع والحجم فقط؛ افتحه بحذر."
+                  >
+                    غير مفحوص ضد البرمجيات الخبيثة
+                  </span>
+                )}
               </span>
               {downloadBase && (
                 <a

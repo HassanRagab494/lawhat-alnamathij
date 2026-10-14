@@ -73,7 +73,15 @@ describe('toDetailDto', () => {
     const dto = toDetailDto(
       response([
         answer('file', {
-          files: [{ id: 'fl1', originalName: 'سيرة.pdf', sizeBytes: 1200, kind: 'PDF' }],
+          files: [
+            {
+              id: 'fl1',
+              originalName: 'سيرة.pdf',
+              sizeBytes: 1200,
+              kind: 'PDF',
+              scanEngine: 'not-scanned:UPLOAD_SCAN_MODE=disabled',
+            },
+          ],
         }),
         answer('num', { numberValue: new Prisma.Decimal('1000000.5000000000') }),
         answer('choice', { options: [{ optionId: 'o2' }] }),
@@ -92,7 +100,7 @@ describe('toDetailDto', () => {
       { label: 'ب', selected: true },
     ]);
     expect(dto.answers[0]!.files).toEqual([
-      { id: 'fl1', name: 'سيرة.pdf', size: 1200, kind: 'PDF' },
+      { id: 'fl1', name: 'سيرة.pdf', size: 1200, kind: 'PDF', malwareScanned: false },
     ]);
     expect(dto.formTitle).toBe('العنوان الحالي');
     expect(dto.version.title).toBe('العنوان المنشور');

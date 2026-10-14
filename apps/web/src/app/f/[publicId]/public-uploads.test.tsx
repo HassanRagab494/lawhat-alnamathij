@@ -127,7 +127,7 @@ it('رفع ⇒ فحص ⇒ جاهز، ومنع الإرسال أثناءه، ثم
   act(() => up.progress!(40));
   expect(screen.getByText(/جارٍ الرفع 40%/)).toBeTruthy();
   expect((screen.getByRole('button', { name: 'إرسال' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText('انتظر اكتمال رفع الملفات وفحصها قبل الإرسال.')).toBeTruthy();
+  expect(screen.getByText('انتظر اكتمال رفع الملفات والتحقق منها قبل الإرسال.')).toBeTruthy();
   act(() => up.uploaded!());
   expect(screen.getAllByText(/جارٍ التحقق والفحص/)[0]).toBeTruthy();
   await act(async () => up.resolve!({ id: FILE_ID, name: 'cv.pdf', size: 2048 }));
@@ -180,4 +180,16 @@ it('تحديث الإصدار يزيل الملفات المرتبطة بالإ�
   fireEvent.click(screen.getByRole('button', { name: 'تحديث النموذج' }));
   expect(await screen.findByText(/أعد رفعها قبل الإرسال/)).toBeTruthy();
   expect(screen.queryByText('cv.pdf')).toBeNull();
+});
+
+it('دون فحص برمجيات خبيثة على الخادم: لا تُعرض عبارات الفحص', async () => {
+  const input = await renderReady(makeForm({ fileScanning: false }));
+  expect(screen.getByText(/يُتحقق من نوع كل ملف وحجمه قبل قبوله/)).toBeTruthy();
+  expect(screen.queryByText(/يُفحص كل ملف/)).toBeNull();
+  const up = controllableUpload();
+  fireEvent.change(input, { target: { files: [pdf()] } });
+  await waitFor(() => expect(uploadMock).toHaveBeenCalled());
+  act(() => up.uploaded!());
+  expect(screen.getAllByText(/جارٍ التحقق من الملف/)[0]).toBeTruthy();
+  expect(screen.queryByText(/الفحص/)).toBeNull();
 });

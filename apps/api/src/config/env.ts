@@ -48,6 +48,8 @@ const envSchema = z.object({
   CLAMAV_HOST: z.string().trim().min(1).optional(),
   CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
   CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(60_000),
+  /** فحص الملفات: required (افتراضي) أو disabled بقرار صريح. */
+  UPLOAD_SCAN_MODE: z.enum(['required', 'disabled']).default('required'),
   /** عمر جلسة التعبئة والملفات غير المرسلة. */
   UPLOAD_SESSION_TTL_MINUTES: z.coerce
     .number()

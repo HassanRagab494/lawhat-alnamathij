@@ -256,6 +256,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
         submitDisabled: notice?.kind === 'outdated' || !form.versionId || uploads.busy,
         uploads: {
           items: uploads.items,
+          malwareScanning: form.fileScanning !== false,
           onAdd: (key, files) => {
             if (errors[key])
               setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== key)));
@@ -267,7 +268,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
         notice: (
           <>
             {uploads.busy && (
-              <Alert tone="info">انتظر اكتمال رفع الملفات وفحصها قبل الإرسال.</Alert>
+              <Alert tone="info">انتظر اكتمال رفع الملفات والتحقق منها قبل الإرسال.</Alert>
             )}
             {notice && (
               <NoticeAlert

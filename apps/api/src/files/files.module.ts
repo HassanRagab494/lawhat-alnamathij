@@ -9,7 +9,7 @@ import {
 import { resolve } from 'node:path';
 import { APP_ENV, type AppEnv } from '../config/env';
 import { FilesController } from './files.controller';
-import { ClamdScanner, UnavailableScanner } from './scanner';
+import { ClamdScanner, DisabledScanner, UnavailableScanner } from './scanner';
 import { LocalDiskStorage } from './storage';
 import { FILE_STORAGE, MALWARE_SCANNER, UploadsService } from './uploads.service';
 
@@ -61,9 +61,11 @@ class FilesCleanup implements OnModuleInit, OnApplicationShutdown {
       provide: MALWARE_SCANNER,
       inject: [APP_ENV],
       useFactory: (env: AppEnv) =>
-        env.CLAMAV_HOST
-          ? new ClamdScanner(env.CLAMAV_HOST, env.CLAMAV_PORT, env.CLAMAV_TIMEOUT_MS)
-          : new UnavailableScanner(),
+        env.UPLOAD_SCAN_MODE === 'disabled'
+          ? new DisabledScanner()
+          : env.CLAMAV_HOST
+            ? new ClamdScanner(env.CLAMAV_HOST, env.CLAMAV_PORT, env.CLAMAV_TIMEOUT_MS)
+            : new UnavailableScanner(),
     },
     UploadsService,
     FilesCleanup,

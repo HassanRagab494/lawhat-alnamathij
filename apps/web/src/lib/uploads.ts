@@ -1,8 +1,8 @@
 import { ApiError, toApiError } from './api';
 import { FILE_TYPE_LABELS, type FileTypeKey } from './question-limits';
 
-/** حالة ملف في الصفحة العامة: لا يُعد جاهزًا للإرسال إلا بعد قبول الخادم (التحقق والفحص). */
-export type UploadStatus = 'uploading' | 'scanning' | 'ready' | 'error';
+/** حالة ملف في الصفحة العامة: لا يُعد جاهزًا للإرسال إلا بعد قبول الخادم. */
+export type UploadStatus = 'uploading' | 'checking' | 'ready' | 'error';
 
 export interface UploadItem {
   localId: string;
@@ -36,7 +36,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} ميغابايت`;
 }
 
-/** فحص مبدئي في المتصفح (الخادم يتحقق دائمًا من المحتوى الفعلي ويفحص الملف). */
+/** فحص مبدئي في المتصفح (الخادم يتحقق دائمًا من المحتوى الفعلي والحجم). */
 export function precheckFile(
   file: { name: string; size: number },
   settings: { allowedTypes?: FileTypeKey[]; maxFileSizeMb?: number },
@@ -77,7 +77,7 @@ export async function createFillSession(publicId: string): Promise<string> {
 
 /**
  * يرفع الملف بالتدفق عبر XHR لعرض التقدم. onUploaded يُستدعى عند اكتمال الإرسال
- * (يبدأ الخادم التحقق والفحص قبل أن يرد).
+ * (يبدأ الخادم التحقق قبل أن يرد).
  */
 export function uploadFile(
   publicId: string,

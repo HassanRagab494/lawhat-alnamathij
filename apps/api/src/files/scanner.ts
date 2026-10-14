@@ -92,3 +92,16 @@ export class UnavailableScanner implements MalwareScanner {
     throw new ScanUnavailable('scanner not configured');
   }
 }
+
+/** قيمة scan_engine للملفات المقبولة دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled). */
+export const NOT_SCANNED_ENGINE = 'not-scanned:UPLOAD_SCAN_MODE=disabled';
+
+/**
+ * وضع تشغيل صريح دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled). لا يفحص شيئًا:
+ * الملف يُقبل بعد التحقق من النوع الفعلي والحجم فقط، ويُعلَّم «غير مفحوص» في القاعدة والواجهة.
+ */
+export class DisabledScanner implements MalwareScanner {
+  async scanFile(): Promise<ScanResult> {
+    return { clean: true, engine: NOT_SCANNED_ENGINE };
+  }
+}

@@ -677,4 +677,70 @@ describe('المرحلة النهائية: رفع الملفات', () => {
       .expect(409);
     expect(blocked.body.details.reasons[0]).toMatch(/رفع الملفات غير مفعّل/);
   });
+
+  it('UPLOAD_SCAN_MODE=disabled: الرفع دون فاحص مع بقاء قيود النوع والحجم، والملفات معلّمة «غير مفحوصة»', async () => {
+    await app.close();
+    app = await startApp({ CLAMAV_HOST: undefined, UPLOAD_SCAN_MODE: 'disabled' });
+    admin = await login(ADMIN);
+    const created = await createPublished('نموذج دون فاحص', [
+      {
+        type: 'FILE_UPLOAD',
+        title: 'مرفق',
+        required: true,
+        settings: { allowedTypes: ['pdf', 'png', 'txt'], maxFileSizeMb: 1, maxFiles: 3 },
+      },
+    ]);
+    const f = await pub.form(created.publicId);
+    expect(f.fileScanning).toBe(false);
+    const q = f.questions[0].id;
+    const token = (await pub.session(created.publicId).expect(201)).body.token;
+    const pdf = (await pub.upload(created.publicId, token, q, 'a.pdf', samples.pdf()).expect(201))
+      .body;
+    const png = (await pub.upload(created.publicId, token, q, 'b.png', samples.png()).expect(201))
+      .body;
+    // التحقق من النوع والامتداد والحجم ما زال مطبقًا
+    expect(
+      (await pub.upload(created.publicId, token, q, 'c.exe', samples.pdf()).expect(400)).body.code,
+    ).toBe('FILE_REJECTED');
+    expect(
+      (await pub.upload(created.publicId, token, q, 'd.pdf', samples.png()).expect(400)).body.code,
+    ).toBe('FILE_REJECTED');
+    const big = Buffer.concat([samples.pdf(), Buffer.alloc(1024 * 1024 + 10, 0x20)]);
+    expect(
+      (await pub.upload(created.publicId, token, q, 'big.pdf', big).expect(413)).body.code,
+    ).toBe('FILE_TOO_LARGE');
+    // لا فحص برمجيات خبيثة في هذا الوضع: سلسلة EICAR داخل ملف نصي صالح تُقبل وتُعلَّم غير مفحوصة
+    const eicar = (
+      await pub.upload(created.publicId, token, q, 'e.txt', samples.eicar()).expect(201)
+    ).body;
+    const rows = await prisma.uploadedFile.findMany({
+      where: { id: { in: [pdf.id, png.id, eicar.id] } },
+    });
+    expect(rows.every((r) => r.scanEngine === 'not-scanned:UPLOAD_SCAN_MODE=disabled')).toBe(true);
+    const sub = await pub
+      .submit(created.publicId, {
+        versionId: f.versionId,
+        fillSession: token,
+        idempotencyKey: randomUUID(),
+        answers: [{ questionId: q, value: [pdf.id, png.id] }],
+      })
+      .expect(201);
+    const resp = await prisma.formResponse.findUnique({
+      where: { referenceCode: sub.body.referenceCode },
+    });
+    const detail = (
+      await as(admin).get(`/api/forms/${created.id}/responses/${resp!.id}`).expect(200)
+    ).body;
+    const files = detail.answers[0].files;
+    expect(files.map((x: any) => [x.name, x.malwareScanned])).toEqual([
+      ['a.pdf', false],
+      ['b.png', false],
+    ]);
+    await as(admin)
+      .get(`/api/forms/${created.id}/responses/${resp!.id}/files/${pdf.id}`)
+      .expect(200);
+    await as(viewer)
+      .get(`/api/forms/${created.id}/responses/${resp!.id}/files/${pdf.id}`)
+      .expect(403);
+  });
 });

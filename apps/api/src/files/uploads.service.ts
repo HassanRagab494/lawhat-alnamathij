@@ -78,9 +78,17 @@ export class UploadsService {
     @Inject(MALWARE_SCANNER) private readonly scanner: MalwareScanner,
   ) {}
 
-  /** الرفع مفعّل فقط عند ضبط فاحص؛ لا يوجد وضع يقبل الملفات دون فحص. */
+  /**
+   * الرفع مفعّل عند ضبط فاحص (UPLOAD_SCAN_MODE=required مع CLAMAV_HOST)، أو عند اختيار
+   * UPLOAD_SCAN_MODE=disabled صراحة: يُقبل الملف بعد التحقق من النوع والحجم دون فحص برمجيات خبيثة.
+   */
   get enabled(): boolean {
-    return Boolean(this.env.CLAMAV_HOST);
+    return this.env.UPLOAD_SCAN_MODE === 'disabled' || Boolean(this.env.CLAMAV_HOST);
+  }
+
+  /** هل تُفحص الملفات ضد البرمجيات الخبيثة؟ false في وضع disabled. */
+  get malwareScanning(): boolean {
+    return this.env.UPLOAD_SCAN_MODE === 'required';
   }
 
   private assertEnabled(): void {

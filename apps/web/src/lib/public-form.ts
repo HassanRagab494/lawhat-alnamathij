@@ -27,6 +27,8 @@ export interface PublicForm {
   acceptingResponses: boolean;
   versionId: string | null;
   questions: PublicQuestion[];
+  /** false حين يقبل الخادم الملفات دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled). */
+  fileScanning?: boolean;
 }
 
 export interface SubmitResult {

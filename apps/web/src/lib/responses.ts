@@ -44,6 +44,8 @@ export interface AnswerFile {
   name: string;
   size: number;
   kind: string;
+  /** false إن قُبل دون فحص برمجيات خبيثة. */
+  malwareScanned?: boolean;
 }
 
 export interface AnswerView {

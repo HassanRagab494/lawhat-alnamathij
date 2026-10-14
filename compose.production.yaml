@@ -8,10 +8,11 @@
 #   - api وmysql على شبكة backend الداخلية فقط (internal: true)؛ لا دومين ولا router لهما.
 #   - web يصل إلى api عبر الاسم المستعار lawha-api-backend المعرّف على شبكة backend وحدها،
 #     فيأتي اتصاله من BACKEND_SUBNET، وTRUST_PROXY في api = BACKEND_SUBNET فقط.
-#   - clamav (فاحص الملفات) وbackup بلا منافذ ولا دومينات؛ clamav على default أيضًا لتحديث التواقيع فقط.
+#   - backup بلا منافذ ولا دومينات. فاحص ClamAV غير مُشغَّل في هذا الإعداد (UPLOAD_SCAN_MODE=disabled)؛
+#     لتفعيله انظر deploy/clamav/compose.clamav.yaml.
 #   - نسخة api واحدة فقط: حدود المعدل في الذاكرة (لا تُضف replicas).
 # التخزين الدائم الخاص بالمشروع: lawha-mysql-data (القاعدة)، lawha-uploads (الملفات)، lawha-backups (النسخ)،
-# lawha-clamav-db (تواقيع الفاحص). لا تحذف أي volume عند إعادة النشر.
+# لا تحذف أي volume عند إعادة النشر.
 
 name: lawhat-alnamathij
 
@@ -49,9 +50,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      # لا ينتظر جاهزية الفاحص: الرفع يُرفض برسالة واضحة حتى يجهز، ولا يُقبل ملف دون فحص.
-      clamav:
-        condition: service_started
     environment:
       NODE_ENV: production
       APP_NAME: ${APP_NAME:-لوحة النماذج}
@@ -63,6 +61,7 @@ services:
       # يثق بـ X-Forwarded-For من شبكة backend فقط (أي من web). لا تضع true أو شبكة عامة.
       TRUST_PROXY: ${BACKEND_SUBNET:-10.213.47.0/28}
       API_DOCS_ENABLED: 'false'
+      UPLOAD_SCAN_MODE: ${UPLOAD_SCAN_MODE:-required}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
       SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-120}
       LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
@@ -72,11 +71,8 @@ services:
       PUBLIC_SUBMIT_PER_FORM_PER_MINUTE: ${PUBLIC_SUBMIT_PER_FORM_PER_MINUTE:-120}
       RESPONSES_RATE_LIMIT_PER_MINUTE: ${RESPONSES_RATE_LIMIT_PER_MINUTE:-120}
       RESPONSES_EXPORT_PER_MINUTE: ${RESPONSES_EXPORT_PER_MINUTE:-5}
-      # رفع الملفات: تخزين في volume خاص، وفحص بـ clamd عبر الشبكة الداخلية فقط.
+      # الرفع يعمل في وضع disabled المعلن دون خدمة فحص، مع بقاء قيود النوع والحجم.
       UPLOAD_DIR: /data/uploads
-      CLAMAV_HOST: lawha-clamav-backend
-      CLAMAV_PORT: '3310'
-      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-60000}
       UPLOAD_SESSION_TTL_MINUTES: ${UPLOAD_SESSION_TTL_MINUTES:-240}
       UPLOAD_SESSION_MAX_MB: ${UPLOAD_SESSION_MAX_MB:-100}
       UPLOAD_STORAGE_MAX_GB: ${UPLOAD_STORAGE_MAX_GB:-20}
@@ -112,26 +108,6 @@ services:
       - default
       - backend
 
-  clamav:
-    build:
-      context: .
-      dockerfile: deploy/clamav/Dockerfile
-    restart: unless-stopped
-    # سقف موارد صريح حتى لا يضر المشاريع الأخرى على الخادم (التواقيع وحدها ~1.2GB في الذاكرة).
-    mem_limit: ${CLAMAV_MEM_LIMIT:-2g}
-    memswap_limit: ${CLAMAV_MEM_LIMIT:-2g}
-    cpus: ${CLAMAV_CPUS:-1.0}
-    volumes:
-      - lawha-clamav-db:/var/lib/clamav
-    expose:
-      - '3310'
-    networks:
-      # default: اتصال خارجي لتحديث التواقيع (freshclam) فقط؛ backend: ليصل إليه api.
-      default: {}
-      backend:
-        aliases:
-          - lawha-clamav-backend
-
   backup:
     build:
       context: .
@@ -146,8 +122,9 @@ services:
       DB_HOST: mysql
       DB_NAME: lawha
       BACKUP_DB_USER: lawha_backup
-      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?اضبط BACKUP_DB_PASSWORD (حساب القراءة lawha_backup)}
-      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?اضبط BACKUP_ENCRYPTION_KEY واحفظ نسخة منه خارج الخادم}
+      # النسخ لا يعمل حتى يُضبط السران (الحالة في /backups/last-status.json)؛ غيابهما لا يوقف النشر.
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:-}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
       BACKUP_TIME: ${BACKUP_TIME:-02:30}
       KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
       KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
@@ -172,4 +149,3 @@ volumes:
   lawha-mysql-data:
   lawha-uploads:
   lawha-backups:
-  lawha-clamav-db:

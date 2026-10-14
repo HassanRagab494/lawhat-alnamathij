@@ -33,6 +33,11 @@ export class PublicFormDto {
   versionId!: string | null;
   @ApiProperty({ type: [PublicQuestionDto], description: 'فارغة عند إغلاق الاستقبال' })
   questions!: PublicQuestionDto[];
+  @ApiProperty({
+    description:
+      'هل تُفحص الملفات المرفوعة ضد البرمجيات الخبيثة (false في UPLOAD_SCAN_MODE=disabled)',
+  })
+  fileScanning!: boolean;
 }
 
 export class SubmitAnswerDto {

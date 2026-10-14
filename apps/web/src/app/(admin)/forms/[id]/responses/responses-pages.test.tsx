@@ -134,7 +134,15 @@ const detail = {
       description: null,
       required: false,
       kind: 'files',
-      files: [{ id: 'file-1', name: 'سيرة <b>ذاتية</b>.pdf', size: 2048, kind: 'PDF' }],
+      files: [
+        {
+          id: 'file-1',
+          name: 'سيرة <b>ذاتية</b>.pdf',
+          size: 2048,
+          kind: 'PDF',
+          malwareScanned: false,
+        },
+      ],
     },
     {
       questionId: 'q5',
@@ -236,6 +244,7 @@ it('التفاصيل: كل نوع إجابة كنص آمن، دون أداة ت�
   // الملف: الاسم والحجم نصًا، ودون رابط تنزيل لمن لا يملك صلاحية التنزيل
   expect(screen.getByText('سيرة <b>ذاتية</b>.pdf')).toBeTruthy();
   expect(screen.getByText('2.0 كيلوبايت')).toBeTruthy();
+  expect(screen.getByText('غير مفحوص ضد البرمجيات الخبيثة')).toBeTruthy();
   expect(screen.queryByRole('link', { name: /تنزيل/ })).toBeNull();
   expect(screen.getByText(/يحتاج صلاحية «تنزيل ملفات الردود»/)).toBeTruthy();
   expect(screen.getByText('-12.5')).toBeTruthy();

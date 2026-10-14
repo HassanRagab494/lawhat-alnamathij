@@ -15,7 +15,7 @@ let seq = 0;
 
 /**
  * رفع ملفات الصفحة العامة: جلسة تعبئة تُنشأ عند أول ملف (رمزها في الذاكرة فقط)،
- * وحالة كل ملف: رفع ⇒ تحقق وفحص ⇒ جاهز أو مرفوض. الملف لا يُرسل مع الرد إلا إذا قبله الخادم.
+ * وحالة كل ملف: رفع ⇒ تحقق (وفحص إن كان مفعّلًا) ⇒ جاهز أو مرفوض. الملف لا يُرسل مع الرد إلا إذا قبله الخادم.
  */
 export function usePublicUploads(publicId: string, form: PublicForm | null) {
   const [items, setItems] = useState<Record<string, UploadItem[]>>({});
@@ -80,7 +80,7 @@ export function usePublicUploads(publicId: string, form: PublicForm | null) {
               q.id,
               file,
               (progress) => patch(key, item.localId, { progress }),
-              () => patch(key, item.localId, { status: 'scanning', progress: 100 }),
+              () => patch(key, item.localId, { status: 'checking', progress: 100 }),
             );
             aborts.current.set(item.localId, abort);
             const result = await promise;
@@ -120,7 +120,7 @@ export function usePublicUploads(publicId: string, form: PublicForm | null) {
   const readyIds = (key: string) =>
     (items[key] ?? []).filter((i) => i.status === 'ready' && i.fileId).map((i) => i.fileId!);
   const busy = Object.values(items).some((list) =>
-    list.some((i) => i.status === 'uploading' || i.status === 'scanning'),
+    list.some((i) => i.status === 'uploading' || i.status === 'checking'),
   );
   const any = Object.values(items).some((list) => list.length > 0);
 

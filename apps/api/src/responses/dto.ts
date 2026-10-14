@@ -108,6 +108,10 @@ export class AnswerFileDto {
   @ApiProperty({ description: 'الاسم الأصلي بعد التنظيف' }) name!: string;
   @ApiProperty() size!: number;
   @ApiProperty({ enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT'] }) kind!: string;
+  @ApiProperty({
+    description: 'false إن قُبل الملف دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled)',
+  })
+  malwareScanned!: boolean;
 }
 
 export class AnswerOptionViewDto {

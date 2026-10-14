@@ -5,6 +5,14 @@ set -u
 BACKUP_TIME=${BACKUP_TIME:-02:30}
 export TZ=${TZ:-Asia/Riyadh}
 echo "lawha backup scheduler: daily at $BACKUP_TIME ($TZ)"
+if [ -z "${BACKUP_DB_PASSWORD:-}" ] || [ -z "${BACKUP_ENCRYPTION_KEY:-}" ]; then
+  # غير مضبوط بعد: تُسجَّل الحالة ولا تُعاد محاولة التشغيل (المتغيرات لا تتغير دون إعادة نشر)
+  mkdir -p "${BACKUP_DIR:-/backups}"
+  status='{"time":"%s","ok":false,"backup":null,"message":"not configured: set BACKUP_DB_PASSWORD and BACKUP_ENCRYPTION_KEY"}'
+  printf "$status\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${BACKUP_DIR:-/backups}/last-status.json"
+  echo "backup not configured: set BACKUP_DB_PASSWORD and BACKUP_ENCRYPTION_KEY" >&2
+  while true; do sleep 86400; done
+fi
 while true; do
   now=$(date +%s)
   next=$(date -d "today $BACKUP_TIME" +%s)

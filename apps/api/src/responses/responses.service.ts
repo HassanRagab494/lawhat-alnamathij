@@ -8,6 +8,7 @@ import { AppError, Errors } from '../common/errors';
 import { pageMeta } from '../common/pagination';
 import { runFormTransaction } from '../forms/form-transaction';
 import type { QuestionTypeKey } from '../forms/questions/limits';
+import { NOT_SCANNED_ENGINE } from '../files/scanner';
 import { FILE_STORAGE } from '../files/uploads.service';
 import type { FileStorage } from '../files/storage';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +47,7 @@ const detailInclude = {
       options: { select: { optionId: true } },
       files: {
         orderBy: { createdAt: 'asc' },
-        select: { id: true, originalName: true, sizeBytes: true, kind: true },
+        select: { id: true, originalName: true, sizeBytes: true, kind: true, scanEngine: true },
       },
     },
   },
@@ -89,6 +90,7 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
           name: f.originalName,
           size: f.sizeBytes,
           kind: f.kind,
+          malwareScanned: f.scanEngine !== NOT_SCANNED_ENGINE,
         })),
       };
     }

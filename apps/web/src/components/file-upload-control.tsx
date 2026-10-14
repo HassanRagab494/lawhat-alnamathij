@@ -8,16 +8,19 @@ import { acceptAttribute, formatBytes, type UploadItem } from '@/lib/uploads';
 /** تديره الصفحة العامة: حالة الملفات لكل سؤال وإضافة ملفات وإزالتها. */
 export interface UploadsController {
   items: Record<string, UploadItem[]>;
+  /** هل يفحص الخادم الملفات ضد البرمجيات الخبيثة؟ لا تُعرض عبارات الفحص إن كان false. */
+  malwareScanning: boolean;
   onAdd: (questionKey: string, files: File[]) => void;
   onRemove: (questionKey: string, localId: string) => void;
 }
 
-const STATUS_TEXT: Record<UploadItem['status'], string> = {
-  uploading: 'جارٍ الرفع',
-  scanning: 'جارٍ التحقق والفحص',
-  ready: 'جاهز',
-  error: 'لم يُقبل',
-};
+const statusText = (status: UploadItem['status'], scanning: boolean): string =>
+  ({
+    uploading: 'جارٍ الرفع',
+    checking: scanning ? 'جارٍ التحقق والفحص' : 'جارٍ التحقق من الملف',
+    ready: 'جاهز',
+    error: 'لم يُقبل',
+  })[status];
 
 export function FileUploadControl({
   id,
@@ -66,7 +69,11 @@ export function FileUploadControl({
           حتى {max} {max === 1 ? 'ملف' : 'ملفات'}، والحجم الأقصى لكل ملف {s.maxFileSizeMb ?? 1}{' '}
           ميغابايت
         </li>
-        <li>يُفحص كل ملف قبل قبوله؛ الملفات المشفرة أو المحمية بكلمة مرور لا تُقبل.</li>
+        <li>
+          {controller.malwareScanning
+            ? 'يُفحص كل ملف قبل قبوله؛ الملفات المشفرة أو المحمية بكلمة مرور لا تُقبل.'
+            : 'يُتحقق من نوع كل ملف وحجمه قبل قبوله؛ الملفات المشفرة أو المحمية بكلمة مرور لا تُقبل.'}
+        </li>
       </ul>
       {items.length > 0 && (
         <ul className="flex flex-col gap-2" aria-label={`ملفات «${q.title}»`}>
@@ -97,7 +104,7 @@ export function FileUploadControl({
                             : ''
                       }
                     >
-                      {STATUS_TEXT[item.status]}
+                      {statusText(item.status, controller.malwareScanning)}
                       {item.status === 'uploading' && ` ${item.progress}%`}
                     </span>
                   </p>
@@ -108,23 +115,23 @@ export function FileUploadControl({
                   className="min-h-9 shrink-0 rounded-lg px-3 text-xs font-semibold text-red-800 hover:bg-red-100"
                   aria-label={`إزالة ${item.name}`}
                 >
-                  {item.status === 'uploading' || item.status === 'scanning' ? 'إلغاء' : 'إزالة'}
+                  {item.status === 'uploading' || item.status === 'checking' ? 'إلغاء' : 'إزالة'}
                 </button>
               </div>
-              {(item.status === 'uploading' || item.status === 'scanning') && (
+              {(item.status === 'uploading' || item.status === 'checking') && (
                 <div
                   role="progressbar"
                   aria-label={`تقدم ${item.name}`}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={item.status === 'scanning' ? 100 : item.progress}
+                  aria-valuenow={item.status === 'checking' ? 100 : item.progress}
                   className="h-1.5 overflow-hidden rounded-full bg-smoke-200"
                 >
                   <div
                     className={`h-full rounded-full bg-velvet-600 transition-all ${
-                      item.status === 'scanning' ? 'animate-pulse' : ''
+                      item.status === 'checking' ? 'animate-pulse' : ''
                     }`}
-                    style={{ width: `${item.status === 'scanning' ? 100 : item.progress}%` }}
+                    style={{ width: `${item.status === 'checking' ? 100 : item.progress}%` }}
                   />
                 </div>
               )}
@@ -140,7 +147,7 @@ export function FileUploadControl({
       <span className="sr-only" role="status" aria-live="polite">
         {items
           .filter((i) => i.status !== 'uploading')
-          .map((i) => `${i.name}: ${STATUS_TEXT[i.status]}`)
+          .map((i) => `${i.name}: ${statusText(i.status, controller.malwareScanning)}`)
           .join('، ')}
       </span>
     </div>

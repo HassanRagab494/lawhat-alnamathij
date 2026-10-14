@@ -1,0 +1,29 @@
+# تفعيل فحص البرمجيات الخبيثة (ClamAV) لاحقًا — ليس جزءًا من الإعداد المنشور حاليًا.
+# الاستخدام: أضف الخدمة والـ volume التاليين إلى compose.production.yaml، ثم في خدمة api اضبط:
+#   UPLOAD_SCAN_MODE: required
+#   CLAMAV_HOST: lawha-clamav-backend
+#   CLAMAV_PORT: '3310'
+# وتأكد قبل ذلك من توفر ذاكرة حرة كافية على الخادم (≥ 2.5GB؛ انظر deploy/coolify/README.md).
+services:
+  clamav:
+    build:
+      context: .
+      dockerfile: deploy/clamav/Dockerfile
+    restart: unless-stopped
+    # سقف موارد صريح حتى لا يضر المشاريع الأخرى على الخادم (التواقيع وحدها ~1.2GB في الذاكرة).
+    mem_limit: ${CLAMAV_MEM_LIMIT:-2g}
+    memswap_limit: ${CLAMAV_MEM_LIMIT:-2g}
+    cpus: ${CLAMAV_CPUS:-1.0}
+    volumes:
+      - lawha-clamav-db:/var/lib/clamav
+    expose:
+      - '3310'
+    networks:
+      # default: اتصال خارجي لتحديث التواقيع (freshclam) فقط؛ backend: ليصل إليه api.
+      default: {}
+      backend:
+        aliases:
+          - lawha-clamav-backend
+
+volumes:
+  lawha-clamav-db:
