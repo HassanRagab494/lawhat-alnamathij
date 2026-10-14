@@ -1750,7 +1750,7 @@
     },
     "/api/forms/{id}/responses/{responseId}/flowmax/approve": {
       "post": {
-        "description": "يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE برسائل عربية)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.",
+        "description": "يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.",
         "operationId": "FlowmaxController_approve",
         "parameters": [
           {
@@ -1830,6 +1830,93 @@
           }
         ],
         "summary": "إعادة محاولة الإرسال بعد الفشل",
+        "tags": [
+          "flowmax"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/flowmax/publish": {
+      "post": {
+        "description": "بعد اكتمال الإرسال فقط، وبقواعد النشر في Flowmax. الفشل يحفظ السبب ويمكن إعادة المحاولة. المشاركة العامة لا تظهر إلا بعد تأكيد النشر.",
+        "operationId": "FlowmaxController_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "نشر العرض في Flowmax",
+        "tags": [
+          "flowmax"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/flowmax/refresh": {
+      "post": {
+        "operationId": "FlowmaxController_refresh",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "تحديث حالة السجل من Flowmax (النشر والرابط)",
         "tags": [
           "flowmax"
         ]

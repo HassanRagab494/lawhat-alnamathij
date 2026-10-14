@@ -47,15 +47,15 @@
    - لا دومين لـ `api` و`mysql` و`backup`.
 3. **المتغيرات** حسب [`env.example`](env.example):
 
-   | المتغير                                                              | ملاحظة                                                                                                   |
-   | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-   | `MYSQL_PASSWORD`                                                     | سر                                                                                                       |
-   | `MYSQL_ROOT_PASSWORD`                                                | سر                                                                                                       |
-   | `WEB_ORIGIN`                                                         |                                                                                                          |
-   | `UPLOAD_SCAN_MODE`                                                   | `disabled`                                                                                               |
-   | `BACKUP_DB_PASSWORD` و`BACKUP_ENCRYPTION_KEY`                        | سران لتفعيل النسخ الاحتياطي. بدونهما يعمل التطبيق، وخدمة `backup` تسجل «not configured» ولا تنسخ شيئًا   |
-   | `FLOWMAX_ENABLED` و`FLOWMAX_API_BASE_URL` و`FLOWMAX_PUBLIC_SITE_URL` | ربط Flowmax ([docs/flowmax-integration.md](../../docs/flowmax-integration.md)). دونها يبقى الربط معطّلًا |
-   | `FLOWMAX_SERVICE_TOKEN`                                              | سر: رمز حساب تكامل مخصص في Flowmax، لا حساب المدير                                                       |
+   | المتغير                                       | ملاحظة                                                                                                   |
+   | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+   | `MYSQL_PASSWORD`                              | سر                                                                                                       |
+   | `MYSQL_ROOT_PASSWORD`                         | سر                                                                                                       |
+   | `WEB_ORIGIN`                                  |                                                                                                          |
+   | `UPLOAD_SCAN_MODE`                            | `disabled`                                                                                               |
+   | `BACKUP_DB_PASSWORD` و`BACKUP_ENCRYPTION_KEY` | سران لتفعيل النسخ الاحتياطي. بدونهما يعمل التطبيق، وخدمة `backup` تسجل «not configured» ولا تنسخ شيئًا   |
+   | `FLOWMAX_ENABLED` و`FLOWMAX_API_BASE_URL`     | ربط Flowmax ([docs/flowmax-integration.md](../../docs/flowmax-integration.md)). دونها يبقى الربط معطّلًا |
+   | `FLOWMAX_SERVICE_TOKEN`                       | سر: رمز حساب تكامل مخصص في Flowmax، لا حساب المدير                                                       |
 
 4. لا «Expose ports» ولا منافذ منشورة على المضيف.
 

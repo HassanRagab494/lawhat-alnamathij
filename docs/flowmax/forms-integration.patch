@@ -1,0 +1,868 @@
+diff --git a/backend/app/Models/IntegrationIntake.php b/backend/app/Models/IntegrationIntake.php
+new file mode 100644
+index 0000000..026cc91
+--- /dev/null
++++ b/backend/app/Models/IntegrationIntake.php
+@@ -0,0 +1,15 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Models;
++
++use Illuminate\Database\Eloquent\Model;
++
++final class IntegrationIntake extends Model
++{
++    protected $fillable = [
++        'integration_user_id', 'source_key', 'operation', 'request_hash',
++        'target_type', 'target_id', 'parent_intake_id',
++    ];
++}
+diff --git a/backend/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php b/backend/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php
+new file mode 100644
+index 0000000..a0e6bb6
+--- /dev/null
++++ b/backend/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php
+@@ -0,0 +1,117 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Modules\FormsIntegration\Controllers;
++
++use App\Http\Controllers\Controller;
++use App\Models\IntegrationIntake;
++use App\Modules\FormsIntegration\Services\FormsIntegrationService;
++use App\Modules\Properties\Requests\StorePropertyRequest;
++use App\Modules\PropertyDemands\Requests\StoreAdminPropertyDemandRequest;
++use Illuminate\Http\JsonResponse;
++use Illuminate\Http\Request;
++use Illuminate\Support\Arr;
++use Illuminate\Support\Facades\Validator;
++
++/**
++ * Idempotent endpoints for the forms platform integration account
++ * (admin permission integrations.forms). The payload rules are the same
++ * rules used by the admin property and demand endpoints.
++ */
++final class FormsIntegrationController extends Controller
++{
++    private const SOURCE_KEY_RULES = ['required', 'string', 'min:8', 'max:191', 'regex:/^[A-Za-z0-9:._-]+$/'];
++
++    public function __construct(private readonly FormsIntegrationService $integration) {}
++
++    /** POST /api/admin/integrations/forms/offers */
++    public function storeOffer(Request $request): JsonResponse
++    {
++        $rules = StorePropertyRequest::createFrom($request)->rules();
++        $validated = Validator::make($request->all(), ['source_key' => self::SOURCE_KEY_RULES, ...$rules])->validate();
++
++        $result = $this->integration->createOffer(
++            $request->user(),
++            $validated['source_key'],
++            Arr::except($validated, ['source_key']),
++        );
++
++        return $this->respond($result);
++    }
++
++    /** POST /api/admin/integrations/forms/demands */
++    public function storeDemand(Request $request): JsonResponse
++    {
++        if (is_string($request->input('requester_phone'))) {
++            $request->merge(['requester_phone' => trim($request->input('requester_phone'))]);
++        }
++        $rules = Arr::except(StoreAdminPropertyDemandRequest::createFrom($request)->rules(), ['idempotency_key']);
++        $validated = Validator::make($request->all(), [
++            'source_key' => self::SOURCE_KEY_RULES,
++            'idempotency_key' => ['prohibited'],
++            ...$rules,
++        ])->validate();
++
++        $result = $this->integration->createDemand(
++            $request->user(),
++            $validated['source_key'],
++            Arr::except($validated, ['source_key']),
++        );
++
++        return $this->respond($result);
++    }
++
++    /** POST /api/admin/integrations/forms/offers/{sourceKey}/media */
++    public function storeMedia(Request $request, string $sourceKey): JsonResponse
++    {
++        $validated = $request->validate([
++            'media_key' => self::SOURCE_KEY_RULES,
++            'kind' => ['required', 'in:image,video'],
++            'file' => ['required', 'file'],
++        ]);
++        $offer = $this->integration->find($request->user(), $sourceKey);
++        abort_if($offer === null, 404);
++
++        $result = $this->integration->attachMedia(
++            $request->user(),
++            $offer,
++            $validated['media_key'],
++            $validated['kind'],
++            $request->file('file'),
++        );
++
++        return response()->json(
++            ['success' => true, 'data' => $this->integration->record($result['intake'], $result['replayed'])],
++            $result['replayed'] ? 200 : 201,
++        );
++    }
++
++    /** POST /api/admin/integrations/forms/offers/{sourceKey}/publish */
++    public function publishOffer(Request $request, string $sourceKey): JsonResponse
++    {
++        $offer = $this->integration->find($request->user(), $sourceKey);
++        abort_if($offer === null, 404);
++        $this->integration->publishOffer($offer);
++
++        return response()->json(['success' => true, 'data' => $this->integration->record($offer)]);
++    }
++
++    /** GET /api/admin/integrations/forms/records/{sourceKey} */
++    public function show(Request $request, string $sourceKey): JsonResponse
++    {
++        $record = $this->integration->find($request->user(), $sourceKey);
++        abort_if($record === null, 404);
++
++        return response()->json(['success' => true, 'data' => $this->integration->record($record)]);
++    }
++
++    /** @param array{intake: IntegrationIntake, replayed: bool} $result */
++    private function respond(array $result): JsonResponse
++    {
++        return response()->json(
++            ['success' => true, 'data' => $this->integration->record($result['intake'], $result['replayed'])],
++            $result['replayed'] ? 200 : 201,
++        );
++    }
++}
+diff --git a/backend/app/Modules/FormsIntegration/Services/FormsIntegrationService.php b/backend/app/Modules/FormsIntegration/Services/FormsIntegrationService.php
+new file mode 100644
+index 0000000..14e05f9
+--- /dev/null
++++ b/backend/app/Modules/FormsIntegration/Services/FormsIntegrationService.php
+@@ -0,0 +1,257 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Modules\FormsIntegration\Services;
++
++use App\Exceptions\FlowmaxRuleException;
++use App\Models\IntegrationIntake;
++use App\Models\Property;
++use App\Models\PropertyDemand;
++use App\Models\User;
++use App\Modules\Properties\Services\PropertyCatalogService;
++use App\Modules\Properties\Services\PropertyFieldDefinitionService;
++use App\Modules\Properties\Services\PropertyService;
++use App\Modules\Properties\Services\PropertyVideoService;
++use App\Modules\PropertyDemands\Services\PropertyDemandService;
++use Closure;
++use Illuminate\Http\UploadedFile;
++use Illuminate\Support\Facades\DB;
++
++/**
++ * Idempotent intake for the forms platform. Every write is keyed by
++ * (integration user, source_key) under a database unique constraint:
++ * a retry or a concurrent duplicate returns the original record, and the
++ * same key with different content is rejected with 409. Records are created
++ * through the existing property/demand services, so their validation and
++ * publication rules still apply.
++ */
++final class FormsIntegrationService
++{
++    public const OFFER = 'offer';
++
++    public const DEMAND = 'demand';
++
++    public const IMAGE = 'offer_image';
++
++    public const VIDEO = 'offer_video';
++
++    private const CLAIM_ATTEMPTS = 10;
++
++    public function __construct(
++        private readonly PropertyService $properties,
++        private readonly PropertyVideoService $videos,
++        private readonly PropertyFieldDefinitionService $propertyFields,
++        private readonly PropertyCatalogService $catalog,
++        private readonly PropertyDemandService $demands,
++    ) {}
++
++    /**
++     * @param  array<string, mixed>  $payload  validated property payload
++     * @return array{intake: IntegrationIntake, replayed: bool}
++     */
++    public function createOffer(User $actor, string $sourceKey, array $payload): array
++    {
++        return $this->claim($actor, $sourceKey, self::OFFER, $this->hash($payload), null, function () use ($payload, $actor): array {
++            $property = $this->properties->create($payload);
++            $this->propertyFields->replaceValues($property, $payload['custom_attributes'] ?? [], $actor);
++
++            return ['property', $property->id];
++        });
++    }
++
++    /**
++     * @param  array<string, mixed>  $payload  validated demand payload (without idempotency_key)
++     * @return array{intake: IntegrationIntake, replayed: bool}
++     */
++    public function createDemand(User $actor, string $sourceKey, array $payload): array
++    {
++        return $this->claim($actor, $sourceKey, self::DEMAND, $this->hash($payload), null, function () use ($payload, $actor, $sourceKey): array {
++            $demand = $this->demands->createFromAdminIntake([
++                ...$payload,
++                // The demand service keeps its own idempotency; derive a stable key from the source key.
++                'idempotency_key' => 'forms-'.hash('sha256', $actor->id.'|'.$sourceKey),
++            ], $actor);
++
++            return ['property_demand', $demand->id];
++        });
++    }
++
++    /**
++     * Attach one media file to an offer. Each attachment has its own key, so a
++     * lost response followed by a retry never stores the file twice.
++     *
++     * @return array{intake: IntegrationIntake, replayed: bool}
++     */
++    public function attachMedia(User $actor, IntegrationIntake $offer, string $mediaKey, string $kind, UploadedFile $file): array
++    {
++        $property = $this->offerProperty($offer);
++        $operation = $kind === 'video' ? self::VIDEO : self::IMAGE;
++        $hash = $this->hash([
++            'offer' => $offer->id,
++            'kind' => $kind,
++            'sha256' => hash_file('sha256', (string) $file->getRealPath()),
++        ]);
++
++        return $this->claim($actor, $mediaKey, $operation, $hash, $offer->id, function () use ($property, $kind, $file): array {
++            if ($kind === 'video') {
++                $video = $this->videos->upload($property, $file);
++
++                return ['property_video', $video->id];
++            }
++            $image = $this->properties->uploadImage($property, $file);
++
++            return ['property_image', $image->id];
++        });
++    }
++
++    /** Publish through the standard publication rules; publishing twice is a no-op. */
++    public function publishOffer(IntegrationIntake $offer): Property
++    {
++        $property = $this->offerProperty($offer);
++        if ($property->status === 'Published') {
++            return $property;
++        }
++
++        return $this->properties->publish($property);
++    }
++
++    public function find(User $actor, string $sourceKey): ?IntegrationIntake
++    {
++        return IntegrationIntake::query()
++            ->where('integration_user_id', $actor->id)
++            ->where('source_key', $sourceKey)
++            ->whereNotNull('target_id')
++            ->first();
++    }
++
++    /**
++     * Public projection of an offer or demand: identifiers, status and the
++     * detail URL. Contact and internal fields are never included.
++     *
++     * @return array<string, mixed>
++     */
++    public function record(IntegrationIntake $intake, bool $replayed = false): array
++    {
++        $base = rtrim((string) config('app.frontend_url'), '/');
++
++        if ($intake->operation === self::OFFER) {
++            $property = Property::query()->withCount(['images', 'videos'])->findOrFail($intake->target_id);
++            $isPublic = $property->status === 'Published' && $this->catalog->isVisible($property);
++
++            return [
++                'source_key' => $intake->source_key,
++                'operation' => self::OFFER,
++                'id' => $property->id,
++                'reference' => $property->property_code,
++                'status' => $property->status,
++                'is_public' => $isPublic,
++                // Detail page route of the Flowmax website: frontend/website/app/property/[id]
++                'detail_url' => $base.'/property/'.$property->id,
++                'images_count' => $property->images_count,
++                'videos_count' => $property->videos_count,
++                'replayed' => $replayed,
++            ];
++        }
++
++        if ($intake->operation === self::DEMAND) {
++            $demand = PropertyDemand::query()->findOrFail($intake->target_id);
++            $isPublic = $this->demands->publicQuery()->whereKey($demand->id)->exists();
++
++            return [
++                'source_key' => $intake->source_key,
++                'operation' => self::DEMAND,
++                'id' => $demand->id,
++                'reference' => $demand->public_reference,
++                'status' => $demand->status,
++                'is_public' => $isPublic,
++                // Detail page route of the Flowmax website: frontend/website/app/properties/demands/[reference]
++                'detail_url' => $base.'/properties/demands/'.$demand->public_reference,
++                'replayed' => $replayed,
++            ];
++        }
++
++        return [
++            'media_key' => $intake->source_key,
++            'operation' => $intake->operation,
++            'id' => $intake->target_id,
++            'replayed' => $replayed,
++        ];
++    }
++
++    private function offerProperty(IntegrationIntake $offer): Property
++    {
++        if ($offer->operation !== self::OFFER) {
++            throw new FlowmaxRuleException('integration_record_not_offer', 'The source record is not a property offer.', 422);
++        }
++
++        return Property::query()->findOrFail($offer->target_id);
++    }
++
++    /**
++     * Claim the key, then create the record in the same transaction. The
++     * unique index serialises concurrent requests for one key: the second
++     * waits for the first to commit and then replays its result. A lock
++     * conflict (MySQL deadlock between the duplicate-key check and the row
++     * lock) rolls back and retries the whole claim.
++     *
++     * @param  Closure(): array{0: string, 1: int}  $create
++     * @return array{intake: IntegrationIntake, replayed: bool}
++     */
++    private function claim(User $actor, string $sourceKey, string $operation, string $hash, ?int $parentId, Closure $create): array
++    {
++        return DB::transaction(function () use ($actor, $sourceKey, $operation, $hash, $parentId, $create): array {
++            $now = now();
++            DB::table('integration_intakes')->insertOrIgnore([
++                'integration_user_id' => $actor->id,
++                'source_key' => $sourceKey,
++                'operation' => $operation,
++                'request_hash' => $hash,
++                'parent_intake_id' => $parentId,
++                'created_at' => $now,
++                'updated_at' => $now,
++            ]);
++
++            $intake = IntegrationIntake::query()
++                ->where('integration_user_id', $actor->id)
++                ->where('source_key', $sourceKey)
++                ->lockForUpdate()
++                ->firstOrFail();
++
++            if ($intake->operation !== $operation || ! hash_equals($intake->request_hash, $hash)) {
++                throw new FlowmaxRuleException(
++                    'integration_key_conflict',
++                    'This source key was already used with different content.',
++                    409,
++                );
++            }
++
++            if ($intake->target_id !== null) {
++                return ['intake' => $intake, 'replayed' => true];
++            }
++
++            [$type, $id] = $create();
++            $intake->forceFill(['target_type' => $type, 'target_id' => $id])->save();
++
++            return ['intake' => $intake, 'replayed' => false];
++        }, self::CLAIM_ATTEMPTS);
++    }
++
++    /** @param array<string, mixed> $payload */
++    private function hash(array $payload): string
++    {
++        return hash('sha256', json_encode($this->canonical($payload), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
++    }
++
++    private function canonical(mixed $value): mixed
++    {
++        if (! is_array($value)) {
++            return $value;
++        }
++        if (! array_is_list($value)) {
++            ksort($value);
++        }
++
++        return array_map(fn ($item) => $this->canonical($item), $value);
++    }
++}
+diff --git a/backend/app/Modules/Supervisors/Services/SupervisorService.php b/backend/app/Modules/Supervisors/Services/SupervisorService.php
+index 8f798b3..109f023 100644
+--- a/backend/app/Modules/Supervisors/Services/SupervisorService.php
++++ b/backend/app/Modules/Supervisors/Services/SupervisorService.php
+@@ -36,6 +36,7 @@ final class SupervisorService
+         'ai.view',
+         'settings.manage',
+         'notifications.manage',
++        'integrations.forms',
+     ];
+ 
+     public function __construct(private readonly AuditService $audit) {}
+diff --git a/backend/database/migrations/2026_10_15_000001_create_integration_intakes_table.php b/backend/database/migrations/2026_10_15_000001_create_integration_intakes_table.php
+new file mode 100644
+index 0000000..7e5b283
+--- /dev/null
++++ b/backend/database/migrations/2026_10_15_000001_create_integration_intakes_table.php
+@@ -0,0 +1,38 @@
++<?php
++
++declare(strict_types=1);
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++/**
++ * Ledger for external integrations (the forms platform). The unique
++ * (integration_user_id, source_key) pair guarantees that one source record
++ * maps to exactly one Flowmax record, across retries and concurrent requests.
++ */
++return new class extends Migration
++{
++    public function up(): void
++    {
++        Schema::create('integration_intakes', function (Blueprint $table): void {
++            $table->id();
++            $table->foreignId('integration_user_id')->constrained('users')->restrictOnDelete();
++            $table->string('source_key', 191);
++            $table->string('operation', 32);
++            $table->char('request_hash', 64);
++            $table->string('target_type', 32)->nullable();
++            $table->unsignedBigInteger('target_id')->nullable();
++            $table->unsignedBigInteger('parent_intake_id')->nullable();
++            $table->timestamps();
++
++            $table->unique(['integration_user_id', 'source_key']);
++            $table->index(['target_type', 'target_id']);
++        });
++    }
++
++    public function down(): void
++    {
++        Schema::dropIfExists('integration_intakes');
++    }
++};
+diff --git a/backend/routes/api/admin.php b/backend/routes/api/admin.php
+index 589005f..e3755c5 100644
+--- a/backend/routes/api/admin.php
++++ b/backend/routes/api/admin.php
+@@ -18,6 +18,7 @@ use App\Modules\Contracts\Controllers\AdminContractDeliveryController;
+ use App\Modules\Contracts\Controllers\AdminContractTemplateController;
+ use App\Modules\Contracts\Controllers\AdminDocumentTemplateVersionController;
+ use App\Modules\DailyRentals\Controllers\AvailabilityController;
++use App\Modules\FormsIntegration\Controllers\FormsIntegrationController;
+ use App\Modules\Marketers\Controllers\AdminBusinessCardTemplateController;
+ use App\Modules\Marketers\Controllers\AdminMarketerProfileController;
+ use App\Modules\Notifications\Controllers\AdminNotificationBroadcastController;
+@@ -58,6 +59,15 @@ use Illuminate\Support\Facades\Route;
+ 
+ Route::prefix('admin')->group(static function (): void {
+ 
++    // Idempotent intake for the forms platform integration account.
++    Route::prefix('integrations/forms')->middleware('admin.permission:integrations.forms')->group(static function (): void {
++        Route::post('/offers', [FormsIntegrationController::class, 'storeOffer'])->name('admin.integrations.forms.offers.store');
++        Route::post('/demands', [FormsIntegrationController::class, 'storeDemand'])->name('admin.integrations.forms.demands.store');
++        Route::post('/offers/{sourceKey}/media', [FormsIntegrationController::class, 'storeMedia'])->name('admin.integrations.forms.offers.media.store');
++        Route::post('/offers/{sourceKey}/publish', [FormsIntegrationController::class, 'publishOffer'])->name('admin.integrations.forms.offers.publish');
++        Route::get('/records/{sourceKey}', [FormsIntegrationController::class, 'show'])->name('admin.integrations.forms.records.show');
++    });
++
+     Route::get('/property-demands/analytics', [AdminPropertyDemandAnalyticsController::class, 'index'])
+         ->middleware('admin.permission:property-demands.analytics,reports.view')
+         ->name('admin.property-demands.analytics.index');
+diff --git a/backend/tests/Feature/FormsIntegration/FormsIntegrationConcurrencyTest.php b/backend/tests/Feature/FormsIntegration/FormsIntegrationConcurrencyTest.php
+new file mode 100644
+index 0000000..2cfb4f9
+--- /dev/null
++++ b/backend/tests/Feature/FormsIntegration/FormsIntegrationConcurrencyTest.php
+@@ -0,0 +1,60 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Models\Developer;
++use App\Models\IntegrationIntake;
++use App\Models\Property;
++use App\Models\User;
++use Illuminate\Support\Facades\Artisan;
++
++/*
++ * Real concurrency needs a database with row locks: run with
++ * DB_CONNECTION=mysql and DB_URL pointing to a dedicated test database.
++ * Skipped on the default in-memory SQLite connection. Only the migrations an
++ * offer needs are applied (the property-demand marketplace migrations are not).
++ */
++beforeEach(function (): void {
++    if (config('database.default') !== 'mysql') {
++        return;
++    }
++    $paths = collect(glob(database_path('migrations/*.php')))
++        ->reject(fn (string $path) => preg_match('/demand|candidate_supply|withdrawal_and_wallet/', basename($path)) === 1)
++        ->values()
++        ->all();
++    Artisan::call('migrate:fresh', ['--path' => $paths, '--realpath' => true, '--force' => true]);
++});
++
++it('creates exactly one property when parallel processes claim the same source key', function (): void {
++    $user = User::factory()->create(['role' => 'admin', 'status' => 'active', 'admin_permissions' => ['integrations.forms']]);
++    $developer = Developer::factory()->create();
++    $startAt = (string) (microtime(true) + 3);
++    $script = base_path('tests/Fixtures/forms-integration-claim.php');
++
++    $processes = [];
++    for ($i = 0; $i < 6; $i++) {
++        $pipes = [];
++        $process = proc_open(
++            [PHP_BINARY, $script, (string) $user->id, (string) $developer->id, 'lawha:response:concurrent', $startAt],
++            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
++            $pipes,
++            base_path(),
++        );
++        $processes[] = [$process, $pipes];
++    }
++
++    $results = [];
++    foreach ($processes as [$process, $pipes]) {
++        $out = stream_get_contents($pipes[1]);
++        $err = stream_get_contents($pipes[2]);
++        proc_close($process);
++        $results[] = json_decode((string) $out, true) ?? ['error' => trim($out.' '.$err)];
++    }
++
++    $errors = array_filter($results, fn (array $r) => isset($r['error']));
++    expect($errors)->toBe([])
++        ->and(array_unique(array_column($results, 'id')))->toHaveCount(1)
++        ->and(array_filter($results, fn (array $r) => $r['replayed'] === false))->toHaveCount(1)
++        ->and(Property::query()->count())->toBe(1)
++        ->and(IntegrationIntake::query()->count())->toBe(1);
++})->skip(fn () => config('database.default') !== 'mysql', 'requires MySQL row locking');
+diff --git a/backend/tests/Feature/FormsIntegration/FormsIntegrationTest.php b/backend/tests/Feature/FormsIntegration/FormsIntegrationTest.php
+new file mode 100644
+index 0000000..9871f03
+--- /dev/null
++++ b/backend/tests/Feature/FormsIntegration/FormsIntegrationTest.php
+@@ -0,0 +1,259 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Models\Developer;
++use App\Models\IntegrationIntake;
++use App\Models\Property;
++use App\Models\PropertyDemand;
++use App\Models\PropertyImage;
++use App\Models\PropertyVideo;
++use App\Models\User;
++use Illuminate\Database\QueryException;
++use Illuminate\Foundation\Testing\RefreshDatabase;
++use Illuminate\Http\UploadedFile;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Support\Facades\Storage;
++
++uses(RefreshDatabase::class);
++
++function formsIntegrationUser(): User
++{
++    return User::factory()->create([
++        'role' => 'admin',
++        'status' => 'active',
++        'admin_permissions' => ['integrations.forms'],
++    ]);
++}
++
++function formsOfferPayload(int $developerId, array $overrides = []): array
++{
++    return [
++        'source_key' => 'lawha:response:0001',
++        'title_ar' => 'شقة مطلة على الحديقة',
++        'description_ar' => 'ثلاث غرف وصالة',
++        'type_letter' => 'M',
++        'property_category' => 'apartment',
++        'listing_purpose' => 'sale',
++        'developer_id' => $developerId,
++        'mediation_contract_number' => 'MCN-TEST',
++        'contract_day' => '15',
++        'contract_month' => '03',
++        'fal_license_number' => 'FAL-TEST',
++        'requested_price' => 85_000_000,
++        'city' => 'الرياض',
++        'district' => 'النرجس',
++        'contact_phone' => '+966551234567',
++        'listing_notes' => 'اسم المالك: سارة',
++        ...$overrides,
++    ];
++}
++
++function formsDemandPayload(array $overrides = []): array
++{
++    return [
++        'source_key' => 'lawha:response:demand-0001',
++        'requester_name' => 'سارة المالكة',
++        'requester_phone' => '+966551234567',
++        'property_category' => 'apartment',
++        'listing_purpose' => 'rent',
++        'city' => 'الرياض',
++        'budget_max_halalas' => 6_000_000,
++        'consent_version' => 'forms-2026-10',
++        'intake_consent_evidence' => 'Consent recorded in forms response K7Q2',
++        ...$overrides,
++    ];
++}
++
++beforeEach(function (): void {
++    Storage::fake('local');
++    config(['app.frontend_url' => 'https://flowmax.test']);
++    $this->integration = formsIntegrationUser();
++    $this->developer = Developer::factory()->create();
++});
++
++it('creates one draft offer per source key and replays it on retry', function (): void {
++    $payload = formsOfferPayload($this->developer->id);
++
++    $first = $this->actingAs($this->integration)->postJson('/api/admin/integrations/forms/offers', $payload)
++        ->assertCreated()
++        ->assertJsonPath('data.operation', 'offer')
++        ->assertJsonPath('data.status', 'Draft')
++        ->assertJsonPath('data.is_public', false)
++        ->assertJsonPath('data.replayed', false);
++
++    // Same request again (e.g. the first response was lost): same record, no new property.
++    $this->actingAs($this->integration)->postJson('/api/admin/integrations/forms/offers', $payload)
++        ->assertOk()
++        ->assertJsonPath('data.id', $first->json('data.id'))
++        ->assertJsonPath('data.replayed', true);
++
++    expect(Property::query()->count())->toBe(1)
++        ->and($first->json('data.detail_url'))->toBe('https://flowmax.test/property/'.$first->json('data.id'));
++});
++
++it('rejects the same source key with different content with 409', function (): void {
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id, ['requested_price' => 99_000_000]))
++        ->assertStatus(409)
++        ->assertJsonPath('error.code', 'integration_key_conflict');
++
++    expect(Property::query()->count())->toBe(1);
++});
++
++it('enforces the source key at the database level', function (): void {
++    $row = [
++        'integration_user_id' => $this->integration->id,
++        'source_key' => 'lawha:response:dup',
++        'operation' => 'offer',
++        'request_hash' => str_repeat('a', 64),
++        'created_at' => now(),
++        'updated_at' => now(),
++    ];
++    DB::table('integration_intakes')->insert($row);
++
++    expect(fn () => DB::table('integration_intakes')->insert($row))->toThrow(QueryException::class);
++});
++
++it('keeps the existing property validation rules', function (): void {
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id, ['developer_id' => 999_999]))
++        ->assertStatus(422)
++        ->assertJsonPath('error.code', 'validation_error');
++
++    expect(IntegrationIntake::query()->count())->toBe(0);
++});
++
++it('attaches each media file once per media key, including after a lost response', function (): void {
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++    $image = UploadedFile::fake()->image('front.jpg', 800, 600);
++    $request = fn ($file, string $key, string $kind = 'image') => $this->actingAs($this->integration)->post(
++        '/api/admin/integrations/forms/offers/lawha:response:0001/media',
++        ['media_key' => $key, 'kind' => $kind, 'file' => $file],
++        ['Accept' => 'application/json'],
++    );
++
++    $request($image, 'lawha:response:0001:file:img-1')->assertCreated()->assertJsonPath('data.replayed', false);
++    $request($image, 'lawha:response:0001:file:img-1')->assertOk()->assertJsonPath('data.replayed', true);
++    $request(UploadedFile::fake()->image('other.jpg', 640, 480), 'lawha:response:0001:file:img-1')
++        ->assertStatus(409)
++        ->assertJsonPath('error.code', 'integration_key_conflict');
++    $video = UploadedFile::fake()->create('tour.mp4', 512, 'video/mp4');
++    $request($video, 'lawha:response:0001:file:vid-1', 'video')->assertCreated();
++    $request($video, 'lawha:response:0001:file:vid-1', 'video')->assertOk();
++
++    expect(PropertyImage::query()->count())->toBe(1)
++        ->and(PropertyVideo::query()->count())->toBe(1);
++
++    $this->actingAs($this->integration)->getJson('/api/admin/integrations/forms/records/lawha:response:0001')
++        ->assertOk()
++        ->assertJsonPath('data.images_count', 1)
++        ->assertJsonPath('data.videos_count', 1);
++});
++
++it('rejects media Flowmax does not accept instead of storing it', function (): void {
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++
++    $this->actingAs($this->integration)->post(
++        '/api/admin/integrations/forms/offers/lawha:response:0001/media',
++        ['media_key' => 'lawha:response:0001:file:doc', 'kind' => 'image', 'file' => UploadedFile::fake()->create('deed.pdf', 50, 'application/pdf')],
++        ['Accept' => 'application/json'],
++    )->assertStatus(422);
++
++    expect(PropertyImage::query()->count())->toBe(0)
++        ->and(IntegrationIntake::query()->where('source_key', 'lawha:response:0001:file:doc')->exists())->toBeFalse();
++});
++
++it('publishes only through the standard publication rules and reports public visibility', function (): void {
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++
++    // No image yet: publication requirements are not met, record stays a draft.
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers/lawha:response:0001/publish')
++        ->assertStatus(422);
++    $this->actingAs($this->integration)->getJson('/api/admin/integrations/forms/records/lawha:response:0001')
++        ->assertJsonPath('data.status', 'Draft')
++        ->assertJsonPath('data.is_public', false);
++
++    $this->actingAs($this->integration)->post(
++        '/api/admin/integrations/forms/offers/lawha:response:0001/media',
++        ['media_key' => 'lawha:response:0001:file:img-1', 'kind' => 'image', 'file' => UploadedFile::fake()->image('front.jpg', 800, 600)],
++        ['Accept' => 'application/json'],
++    )->assertCreated();
++
++    $published = $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers/lawha:response:0001/publish')
++        ->assertOk()
++        ->assertJsonPath('data.status', 'Published')
++        ->assertJsonPath('data.is_public', true);
++    $this->getJson('/api/public/properties/'.$published->json('data.id'))->assertOk();
++
++    // Publishing again is a no-op.
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers/lawha:response:0001/publish')
++        ->assertOk()
++        ->assertJsonPath('data.status', 'Published');
++});
++
++it('creates one demand per source key with its own detail URL and no contact data in the response', function (): void {
++    $first = $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/demands', formsDemandPayload())
++        ->assertCreated()
++        ->assertJsonPath('data.operation', 'demand')
++        ->assertJsonPath('data.status', 'under_review')
++        ->assertJsonPath('data.is_public', false);
++    $reference = $first->json('data.reference');
++
++    expect($first->json('data.detail_url'))->toBe('https://flowmax.test/properties/demands/'.$reference)
++        ->and(json_encode($first->json()))->not->toContain('551234567')
++        ->and(json_encode($first->json(), JSON_UNESCAPED_UNICODE))->not->toContain('سارة');
++
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/demands', formsDemandPayload())
++        ->assertOk()
++        ->assertJsonPath('data.reference', $reference);
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/demands', formsDemandPayload(['budget_max_halalas' => 7_000_000]))
++        ->assertStatus(409);
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/demands', formsDemandPayload(['source_key' => 'lawha:response:demand-0002', 'idempotency_key' => 'caller-supplied-key-0001']))
++        ->assertStatus(422);
++
++    expect(PropertyDemand::query()->count())->toBe(1);
++});
++
++it('does not return owner contact data in the offer record', function (): void {
++    $response = $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++
++    expect(json_encode($response->json(), JSON_UNESCAPED_UNICODE))
++        ->not->toContain('551234567')
++        ->not->toContain('سارة');
++});
++
++it('limits the integration account and isolates its records', function (): void {
++    $propertiesOnly = User::factory()->create(['role' => 'admin', 'status' => 'active', 'admin_permissions' => ['properties.manage']]);
++    $this->actingAs($propertiesOnly)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertForbidden();
++
++    // The integration account cannot use the general admin property endpoints.
++    $this->actingAs($this->integration)->getJson('/api/admin/properties')->assertForbidden();
++
++    $this->actingAs($this->integration)
++        ->postJson('/api/admin/integrations/forms/offers', formsOfferPayload($this->developer->id))
++        ->assertCreated();
++    $other = formsIntegrationUser();
++    $this->actingAs($other)->getJson('/api/admin/integrations/forms/records/lawha:response:0001')->assertNotFound();
++});
+diff --git a/backend/tests/Fixtures/forms-integration-claim.php b/backend/tests/Fixtures/forms-integration-claim.php
+new file mode 100644
+index 0000000..745227e
+--- /dev/null
++++ b/backend/tests/Fixtures/forms-integration-claim.php
+@@ -0,0 +1,40 @@
++<?php
++
++declare(strict_types=1);
++
++// Separate PHP process used by FormsIntegrationConcurrencyTest: waits for a
++// shared start time, then claims the same source key as its siblings.
++
++use App\Models\User;
++use App\Modules\FormsIntegration\Services\FormsIntegrationService;
++use Illuminate\Contracts\Console\Kernel;
++
++require __DIR__.'/../../vendor/autoload.php';
++$app = require __DIR__.'/../../bootstrap/app.php';
++$app->make(Kernel::class)->bootstrap();
++
++[, $userId, $developerId, $sourceKey, $startAt] = $argv;
++
++while (microtime(true) < (float) $startAt) {
++    usleep(500);
++}
++
++try {
++    $result = app(FormsIntegrationService::class)->createOffer(User::query()->findOrFail((int) $userId), $sourceKey, [
++        'title_ar' => 'عقار اختبار التزامن',
++        'description_ar' => 'وصف',
++        'type_letter' => 'M',
++        'developer_id' => (int) $developerId,
++        'mediation_contract_number' => 'MCN-CONCURRENCY',
++        'contract_day' => '15',
++        'contract_month' => '03',
++        'fal_license_number' => 'FAL-CONCURRENCY',
++        'listing_purpose' => 'sale',
++        'requested_price' => 1_000_000,
++        'city' => 'الرياض',
++        'district' => 'النرجس',
++    ]);
++    echo json_encode(['id' => $result['intake']->target_id, 'replayed' => $result['replayed']]);
++} catch (Throwable $e) {
++    echo json_encode(['error' => $e::class.': '.$e->getMessage()]);
++}
