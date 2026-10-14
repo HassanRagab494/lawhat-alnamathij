@@ -18,6 +18,7 @@ import {
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatDateTime } from '@/lib/format';
+import { formatBytes } from '@/lib/uploads';
 import { can } from '@/lib/permissions';
 import {
   RESPONSE_STATUSES,
@@ -43,7 +44,14 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 /** يعرض الإجابة حسب نوع السؤال كنص عادي (React يهرب أي HTML). */
-function AnswerValue({ answer }: { answer: AnswerView }) {
+function AnswerValue({
+  answer,
+  downloadBase,
+}: {
+  answer: AnswerView;
+  /** مسار تنزيل الملفات إن كان المستخدم يملك صلاحية التنزيل. */
+  downloadBase: string | null;
+}) {
   switch (answer.kind) {
     case 'empty':
       return (
@@ -51,11 +59,37 @@ function AnswerValue({ answer }: { answer: AnswerView }) {
           {answer.required ? 'لا توجد إجابة.' : 'لم تُقدَّم إجابة (سؤال اختياري).'}
         </p>
       );
-    case 'file':
+    case 'files':
       return (
-        <p className="text-sm text-amber-900">
-          سؤال رفع ملفات: رفع الملفات الفعلي غير متاح بعد، فلا توجد ملفات مرفقة بهذا الرد.
-        </p>
+        <ul className="flex flex-col gap-2">
+          {(answer.files ?? []).map((f) => (
+            <li
+              key={f.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-smoke-200 bg-white/70 px-3 py-2 text-sm"
+            >
+              <span className="min-w-0">
+                <span dir="auto" className="break-all font-semibold text-ink">
+                  {f.name}
+                </span>
+                <span className="ms-2 text-xs text-muted">{formatBytes(f.size)}</span>
+              </span>
+              {downloadBase && (
+                <a
+                  href={`${downloadBase}/${f.id}`}
+                  download
+                  rel="noopener"
+                  className="min-h-9 rounded-lg px-3 py-1.5 text-xs font-semibold text-velvet-700 underline hover:bg-velvet-50"
+                  aria-label={`تنزيل ${f.name}`}
+                >
+                  تنزيل
+                </a>
+              )}
+            </li>
+          ))}
+          {!downloadBase && (
+            <li className="text-xs text-muted">تنزيل الملفات يحتاج صلاحية «تنزيل ملفات الردود».</li>
+          )}
+        </ul>
       );
     case 'number':
     case 'date':
@@ -104,6 +138,7 @@ function ResponseDetailView() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const canReview = can(me, 'RESPONSES_REVIEW');
+  const canDownload = can(me, 'RESPONSES_FILES_DOWNLOAD');
 
   // يحافظ على فلاتر القائمة عند الرجوع إليها.
   const list = params.get('list') ?? '';
@@ -190,7 +225,12 @@ function ResponseDetailView() {
                   <p className="mt-1 whitespace-pre-line text-xs text-muted">{a.description}</p>
                 )}
                 <div className="mt-3">
-                  <AnswerValue answer={a} />
+                  <AnswerValue
+                    answer={a}
+                    downloadBase={
+                      canDownload ? `/api/forms/${id}/responses/${responseId}/files` : null
+                    }
+                  />
                 </div>
               </li>
             ))}

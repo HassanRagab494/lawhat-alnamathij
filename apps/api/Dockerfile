@@ -35,6 +35,8 @@ ENV NODE_ENV=production \
 COPY --from=deps --chown=node:node /app /app
 COPY --from=build --chown=node:node /app/apps/api/dist /app/apps/api/dist
 COPY --chown=node:node apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
+# مجلد الملفات (volume lawha-uploads): يملكه node حتى يكتب فيه دون صلاحيات root.
+RUN mkdir -p /data/uploads && chown node:node /data/uploads && chmod 0700 /data/uploads
 WORKDIR /app/apps/api
 USER node
 EXPOSE 4000

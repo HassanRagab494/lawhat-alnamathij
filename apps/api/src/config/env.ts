@@ -38,6 +38,27 @@ const envSchema = z.object({
   PUBLIC_SUBMIT_PER_IP_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(10),
   /** حد إرسال الردود العامة لكل نموذج في الدقيقة (من كل العناوين معًا). */
   PUBLIC_SUBMIT_PER_FORM_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(120),
+  /** حد رفع الملفات (وإنشاء جلسات التعبئة) لكل عنوان IP في الدقيقة. */
+  PUBLIC_UPLOAD_PER_IP_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(30),
+  /** حد رفع الملفات لكل نموذج في الدقيقة (من كل العناوين معًا). */
+  PUBLIC_UPLOAD_PER_FORM_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(300),
+  /** مجلد التخزين الدائم للملفات (volume خاص بالمشروع في الإنتاج). */
+  UPLOAD_DIR: z.string().trim().min(1).default('./.tmp/uploads'),
+  /** مضيف clamd؛ غيابه يعطّل رفع الملفات (لا يُقبل ملف دون فحص). */
+  CLAMAV_HOST: z.string().trim().min(1).optional(),
+  CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
+  CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(60_000),
+  /** عمر جلسة التعبئة والملفات غير المرسلة. */
+  UPLOAD_SESSION_TTL_MINUTES: z.coerce
+    .number()
+    .int()
+    .min(10)
+    .max(24 * 60)
+    .default(240),
+  /** الحد الإجمالي للملفات المقبولة في جلسة تعبئة واحدة. */
+  UPLOAD_SESSION_MAX_MB: z.coerce.number().int().min(1).max(1000).default(100),
+  /** الحد الإجمالي لحجم كل الملفات المخزنة؛ عند بلوغه يُرفض الرفع الجديد. */
+  UPLOAD_STORAGE_MAX_GB: z.coerce.number().min(0.01).max(10_000).default(20),
   /** حد طلبات إدارة الردود (القائمة والتفاصيل وتغيير الحالة) لكل مستخدم في الدقيقة. */
   RESPONSES_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(120),
   /** حد تصدير الردود CSV لكل مستخدم في الدقيقة. */

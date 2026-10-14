@@ -1387,6 +1387,58 @@
         ]
       }
     },
+    "/api/forms/{id}/responses/{responseId}/files/{fileId}": {
+      "get": {
+        "description": "يتطلب RESPONSES_FILES_DOWNLOAD. الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). يُعاد دائمًا كمرفق (attachment) بنوع application/octet-stream، دون عرض داخل المتصفح ودون تخزين مؤقت.",
+        "operationId": "ResponsesController_download",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fileId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "محتوى الملف"
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          },
+          "404": {
+            "description": "النموذج أو الرد أو الملف غير موجود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "تنزيل ملف مرفق برد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
     "/api/forms/{id}/responses/{responseId}/status": {
       "patch": {
         "description": "NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.",
@@ -1448,6 +1500,133 @@
         "summary": "تغيير حالة الرد",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/api/public/forms/{publicId}/upload-sessions": {
+      "post": {
+        "description": "جلسة مجهولة مرتبطة بالنموذج وإصداره الحالي، عمرها محدود (UPLOAD_SESSION_TTL_MINUTES). 503 UPLOADS_UNAVAILABLE إن لم يُضبط فاحص الملفات.",
+        "operationId": "FilesController_createSession",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillSessionDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "إنشاء جلسة تعبئة لرفع الملفات",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/api/public/forms/{publicId}/files": {
+      "post": {
+        "description": "جسم الطلب هو محتوى الملف نفسه (application/octet-stream) بالتدفق. يُتحقق من الحجم والنوع الفعلي (لا الامتداد وحده) ويُفحص بـ ClamAV قبل القبول. الأخطاء: 413 FILE_TOO_LARGE أو SESSION_UPLOAD_LIMIT، 400 FILE_REJECTED، 422 FILE_INFECTED، 503 SCAN_UNAVAILABLE، 409 FILE_COUNT_LIMIT، 507 STORAGE_FULL.",
+        "operationId": "FilesController_upload",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "questionId",
+            "required": true,
+            "in": "query",
+            "schema": {}
+          },
+          {
+            "name": "x-file-name",
+            "in": "header",
+            "description": "اسم الملف مرمّزًا بـ encodeURIComponent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-fill-session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedFileResultDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "رفع ملف لسؤال ملفات",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/api/public/forms/{publicId}/files/{fileId}": {
+      "delete": {
+        "operationId": "FilesController_remove",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fileId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-fill-session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "إزالة ملف قبل الإرسال (من الجلسة نفسها فقط)",
+        "tags": [
+          "public"
         ]
       }
     },
@@ -1578,7 +1757,8 @@
                 "FORMS_INTAKE",
                 "RESPONSES_VIEW",
                 "RESPONSES_REVIEW",
-                "RESPONSES_EXPORT"
+                "RESPONSES_EXPORT",
+                "RESPONSES_FILES_DOWNLOAD"
               ]
             }
           }
@@ -1661,7 +1841,8 @@
                 "FORMS_INTAKE",
                 "RESPONSES_VIEW",
                 "RESPONSES_REVIEW",
-                "RESPONSES_EXPORT"
+                "RESPONSES_EXPORT",
+                "RESPONSES_FILES_DOWNLOAD"
               ]
             }
           },
@@ -1746,7 +1927,8 @@
               "FORMS_INTAKE",
               "RESPONSES_VIEW",
               "RESPONSES_REVIEW",
-              "RESPONSES_EXPORT"
+              "RESPONSES_EXPORT",
+              "RESPONSES_FILES_DOWNLOAD"
             ]
           },
           "label": {
@@ -1763,7 +1945,8 @@
               "FORMS_INTAKE",
               "RESPONSES_VIEW",
               "RESPONSES_REVIEW",
-              "RESPONSES_EXPORT"
+              "RESPONSES_EXPORT",
+              "RESPONSES_FILES_DOWNLOAD"
             ],
             "nullable": true
           }
@@ -1804,7 +1987,8 @@
                 "FORMS_INTAKE",
                 "RESPONSES_VIEW",
                 "RESPONSES_REVIEW",
-                "RESPONSES_EXPORT"
+                "RESPONSES_EXPORT",
+                "RESPONSES_FILES_DOWNLOAD"
               ]
             }
           }
@@ -1836,7 +2020,8 @@
                 "FORMS_INTAKE",
                 "RESPONSES_VIEW",
                 "RESPONSES_REVIEW",
-                "RESPONSES_EXPORT"
+                "RESPONSES_EXPORT",
+                "RESPONSES_FILES_DOWNLOAD"
               ]
             }
           }
@@ -2628,6 +2813,40 @@
           "selected"
         ]
       },
+      "AnswerFileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "للتنزيل عبر مسار الملفات المحمي فقط"
+          },
+          "name": {
+            "type": "string",
+            "description": "الاسم الأصلي بعد التنظيف"
+          },
+          "size": {
+            "type": "number"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "PDF",
+              "JPG",
+              "PNG",
+              "WEBP",
+              "DOCX",
+              "XLSX",
+              "TXT"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size",
+          "kind"
+        ]
+      },
       "AnswerViewDto": {
         "type": "object",
         "properties": {
@@ -2669,9 +2888,9 @@
               "number",
               "date",
               "choice",
-              "file"
+              "files"
             ],
-            "description": "empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ file: لا ملفات في هذه المرحلة"
+            "description": "empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ files: الملفات المرفقة في files"
           },
           "value": {
             "type": "string",
@@ -2681,6 +2900,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AnswerOptionViewDto"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnswerFileDto"
             }
           }
         },
@@ -2820,6 +3045,57 @@
         "required": [
           "changed",
           "response"
+        ]
+      },
+      "FillSessionDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "رمز الجلسة؛ يُرسل في ترويسة X-Fill-Session وفي fillSession عند الإرسال"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "token",
+          "expiresAt"
+        ]
+      },
+      "UploadedFileResultDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "يُرسل ضمن قيمة إجابة سؤال الملفات"
+          },
+          "name": {
+            "type": "string",
+            "description": "الاسم بعد التنظيف"
+          },
+          "size": {
+            "type": "number"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "PDF",
+              "JPG",
+              "PNG",
+              "WEBP",
+              "DOCX",
+              "XLSX",
+              "TXT"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size",
+          "kind"
         ]
       },
       "FormsSummaryDto": {

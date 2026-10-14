@@ -7,7 +7,8 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { THROTTLE, onlyThrottle } from '../common/throttle';
 import type { Response } from 'express';
 import type { AuthContext } from './auth-context';
 import { AuthService } from './auth.service';
@@ -26,7 +27,7 @@ export class AuthController {
   @Post('login')
   @Public()
   @UseGuards(ThrottlerGuard)
-  @SkipThrottle({ submitIp: true, submitForm: true, responses: true, responsesExport: true })
+  @onlyThrottle(THROTTLE.login)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'تسجيل الدخول',

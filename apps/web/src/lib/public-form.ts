@@ -37,6 +37,8 @@ export interface SubmitResult {
 export interface SubmitPayload {
   versionId: string;
   idempotencyKey: string;
+  /** رمز جلسة التعبئة عند إرفاق ملفات. */
+  fillSession?: string;
   answers: { questionId: string; value: string | string[] }[];
 }
 
@@ -59,7 +61,10 @@ function isEmpty(v: AnswerValue): boolean {
   return v === undefined || (Array.isArray(v) ? v.length === 0 : v.trim() === '');
 }
 
-/** يحوّل الإجابات إلى جسم الطلب بمعرّفات الإصدار الحالي. الفارغ لا يُرسل، ولا تُرسل أي بيانات ملفات. */
+/**
+ * يحوّل الإجابات إلى جسم الطلب بمعرّفات الإصدار الحالي. الفارغ لا يُرسل.
+ * سؤال الملفات: معرّفات الملفات التي قبلها الخادم فقط (لا محتوى ملفات).
+ */
 export function buildPayload(
   form: PublicForm,
   answers: PublicAnswers,
@@ -68,7 +73,11 @@ export function buildPayload(
   const out: SubmitPayload['answers'] = [];
   for (const q of form.questions) {
     const value = answers[q.key];
-    if (q.type === 'FILE_UPLOAD' || isEmpty(value)) continue;
+    if (isEmpty(value)) continue;
+    if (q.type === 'FILE_UPLOAD') {
+      if (Array.isArray(value) && value.length) out.push({ questionId: q.id, value: [...value] });
+      continue;
+    }
     const optionId = (key: string) => q.options.find((o) => o.key === key)?.id;
     if (q.type === 'MULTIPLE_CHOICE') {
       const ids = (Array.isArray(value) ? value : [])
@@ -108,6 +117,7 @@ export function mapServerErrors(
 /**
  * ينقل الإجابات إلى إصدار أحدث: تبقى إجابات الأسئلة الموجودة فيه بمفتاحها المنطقي،
  * وتُحذف الخيارات التي لم تعد موجودة، وتُسقط القيم التي لا تناسب نوع السؤال الجديد.
+ * الملفات مرتبطة بالإصدار القديم فلا تُنقل؛ يُطلب رفعها من جديد.
  */
 export function carryOverAnswers(form: PublicForm, answers: PublicAnswers): PublicAnswers {
   const out: PublicAnswers = {};

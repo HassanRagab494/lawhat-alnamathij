@@ -22,7 +22,8 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { Permission } from '@prisma/client';
-import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { THROTTLE, onlyThrottle } from '../common/throttle';
 import type { Response } from 'express';
 import type { AuthContext } from '../auth/auth-context';
 import { CurrentAuth, RequestMeta, RequestMetaData, RequirePermissions } from '../auth/decorators';
@@ -39,6 +40,13 @@ import { ResponsesService } from './responses.service';
 
 const formIdPipe = new ParseIdPipe('النموذج غير موجود.');
 const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
+const fileIdPipe = new ParseIdPipe('الملف غير موجود.');
+
+/** attachment دائمًا؛ اسم ASCII احتياطي واسم UTF-8 كامل وفق RFC 6266/5987. */
+export function contentDisposition(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\;]/g, '_') || 'file';
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
 
 /**
  * إدارة ردود النموذج. كل مسار يتحقق من الصلاحية في الخادم ومن أن الرد يخص النموذج في المسار.
@@ -49,7 +57,7 @@ const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
 @ApiForbiddenResponse({ description: 'FORBIDDEN: لا يملك الصلاحية المطلوبة' })
 @Controller('forms/:id/responses')
 @UseGuards(ThrottlerGuard)
-@SkipThrottle({ login: true, submitIp: true, submitForm: true, responsesExport: true })
+@onlyThrottle(THROTTLE.responses)
 export class ResponsesController {
   constructor(private readonly responses: ResponsesService) {}
 
@@ -71,13 +79,7 @@ export class ResponsesController {
 
   @Get('export')
   @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW, Permission.RESPONSES_EXPORT)
-  @SkipThrottle({
-    login: true,
-    submitIp: true,
-    submitForm: true,
-    responses: true,
-    responsesExport: false,
-  })
+  @onlyThrottle(THROTTLE.responsesExport)
   @ApiOperation({
     summary: 'تصدير الردود CSV',
     description:
@@ -117,6 +119,41 @@ export class ResponsesController {
     @Param('responseId', responseIdPipe) responseId: string,
   ): Promise<ResponseDetailDto> {
     return this.responses.get(formId, responseId);
+  }
+
+  @Get(':responseId/files/:fileId')
+  @RequirePermissions(
+    Permission.FORMS_VIEW,
+    Permission.RESPONSES_VIEW,
+    Permission.RESPONSES_FILES_DOWNLOAD,
+  )
+  @ApiOperation({
+    summary: 'تنزيل ملف مرفق برد',
+    description:
+      'يتطلب RESPONSES_FILES_DOWNLOAD. الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). يُعاد دائمًا كمرفق (attachment) بنوع application/octet-stream، دون عرض داخل المتصفح ودون تخزين مؤقت.',
+  })
+  @ApiProduces('application/octet-stream')
+  @ApiOkResponse({ description: 'محتوى الملف' })
+  @ApiNotFoundResponse({ description: 'النموذج أو الرد أو الملف غير موجود' })
+  async download(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', formIdPipe) formId: string,
+    @Param('responseId', responseIdPipe) responseId: string,
+    @Param('fileId', fileIdPipe) fileId: string,
+    @RequestMetaData() meta: RequestMeta,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.responses.openFile(auth, formId, responseId, fileId, meta);
+    res.set({
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': contentDisposition(file.name),
+      'Content-Length': String(file.size),
+      'Cache-Control': 'no-store, private',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Cross-Origin-Resource-Policy': 'same-origin',
+    });
+    return new StreamableFile(file.stream);
   }
 
   @Patch(':responseId/status')

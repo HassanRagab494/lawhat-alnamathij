@@ -17,6 +17,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   RESPONSES_VIEW: 'عرض الردود',
   RESPONSES_REVIEW: 'مراجعة الردود وتغيير حالتها',
   RESPONSES_EXPORT: 'تصدير الردود',
+  RESPONSES_FILES_DOWNLOAD: 'تنزيل ملفات الردود',
 };
 
 /** صلاحيات لا معنى لها دون صلاحية أخرى (مثلًا: لا تعديل دون عرض). */
@@ -30,6 +31,7 @@ export const PERMISSION_REQUIRES: Partial<Record<Permission, Permission>> = {
   RESPONSES_VIEW: 'FORMS_VIEW',
   RESPONSES_REVIEW: 'RESPONSES_VIEW',
   RESPONSES_EXPORT: 'RESPONSES_VIEW',
+  RESPONSES_FILES_DOWNLOAD: 'RESPONSES_VIEW',
 };
 
 /** مدير النظام يملك كل الصلاحيات دائمًا؛ المشرف يملك ما مُنح له فقط. */

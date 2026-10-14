@@ -6,6 +6,7 @@ import type { AuthContext } from '../auth/auth-context';
 import type { RequestMeta } from '../auth/decorators';
 import { Errors } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
+import { UploadsService } from '../files/uploads.service';
 import { DraftService } from './draft.service';
 import type { FormDto } from './dto';
 import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
@@ -38,14 +39,17 @@ type DraftForPublish = Prisma.FormDraftGetPayload<{
   include: { questions: { include: { options: true } } };
 }>;
 
-/** أسباب منع النشر بالعربية؛ قائمة فارغة تعني أن المسودة قابلة للنشر. */
-export function publishBlockers(draft: DraftForPublish): string[] {
+/**
+ * أسباب منع النشر بالعربية؛ قائمة فارغة تعني أن المسودة قابلة للنشر.
+ * سؤال الملفات مسموح فقط حين يكون الرفع مفعّلًا (فاحص ملفات مضبوط).
+ */
+export function publishBlockers(draft: DraftForPublish, uploadsEnabled = false): string[] {
   const reasons: string[] = [];
   if (draft.questions.length === 0) reasons.push('لا يمكن نشر نموذج بلا أسئلة.');
   draft.questions.forEach((q, i) => {
-    if (q.type === 'FILE_UPLOAD') {
+    if (q.type === 'FILE_UPLOAD' && !uploadsEnabled) {
       reasons.push(
-        `السؤال ${i + 1} «${q.title}» من نوع رفع ملفات، والرفع الفعلي غير متاح بعد. احذفه أو غيّر نوعه قبل النشر.`,
+        `السؤال ${i + 1} «${q.title}» من نوع رفع ملفات، ورفع الملفات غير مفعّل على هذا الخادم (لا يوجد فاحص ملفات مضبوط). احذفه أو غيّر نوعه، أو فعّل الفاحص.`,
       );
     }
   });
@@ -77,6 +81,7 @@ export class PublishService {
     private readonly audit: AuditService,
     private readonly forms: FormsService,
     private readonly drafts: DraftService,
+    private readonly uploads: UploadsService,
   ) {}
 
   /**
@@ -138,7 +143,7 @@ export class PublishService {
           }
           const draft = current.draft;
           if (draft.revision !== input.revision) throw new RevisionConflict();
-          const reasons = publishBlockers(draft);
+          const reasons = publishBlockers(draft, this.uploads.enabled);
           if (reasons.length) {
             throw Errors.conflict('PUBLISH_BLOCKED', 'لا يمكن نشر النموذج بحالته الحالية.', {
               reasons,

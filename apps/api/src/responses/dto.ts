@@ -100,8 +100,15 @@ export class ResponseListDto {
   @ApiProperty({ type: PageMetaDto }) meta!: PageMetaDto;
 }
 
-export const ANSWER_KINDS = ['empty', 'text', 'number', 'date', 'choice', 'file'] as const;
+export const ANSWER_KINDS = ['empty', 'text', 'number', 'date', 'choice', 'files'] as const;
 export type AnswerKind = (typeof ANSWER_KINDS)[number];
+
+export class AnswerFileDto {
+  @ApiProperty({ description: 'للتنزيل عبر مسار الملفات المحمي فقط' }) id!: string;
+  @ApiProperty({ description: 'الاسم الأصلي بعد التنظيف' }) name!: string;
+  @ApiProperty() size!: number;
+  @ApiProperty({ enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT'] }) kind!: string;
+}
 
 export class AnswerOptionViewDto {
   @ApiProperty() label!: string;
@@ -118,12 +125,13 @@ export class AnswerViewDto {
   @ApiProperty({
     enum: ANSWER_KINDS,
     description:
-      'empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ file: لا ملفات في هذه المرحلة',
+      'empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ files: الملفات المرفقة في files',
   })
   kind!: AnswerKind;
   @ApiPropertyOptional({ description: 'النص، أو الرقم كنص عشري، أو التاريخ YYYY-MM-DD' })
   value?: string;
   @ApiPropertyOptional({ type: [AnswerOptionViewDto] }) options?: AnswerOptionViewDto[];
+  @ApiPropertyOptional({ type: () => [AnswerFileDto] }) files?: AnswerFileDto[];
 }
 
 export class StatusChangeDto {

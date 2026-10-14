@@ -1,115 +1,130 @@
-# تجهيز بيئة التجربة على Coolify — lawhat-alnamathij
+# النشر على Coolify — lawhat-alnamathij
 
-> هذا إعداد ليراجعه المسؤول عن Coolify ويشغّله. لم يُطبَّق أي شيء على الاستضافة.
-> **النشر للاستخدام الفعلي غير معتمد بعد.** البنود المفتوحة في آخر الملف.
+> إعداد للمسؤول عن Coolify. لم تُغيَّر الاستضافة من هذا المستودع.
+> المورد: `lawhat-alnamathij-staging` في مشروع `lawhat-alnamathij`. لا تُستخدم موارد Flowmax أو قواعده أو شبكاته، ولا يُعدَّل الوكيل المشترك.
 
 ## الملفات
 
-| الملف                                                                  | الغرض                                                                     |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`compose.production.yaml`](../../compose.production.yaml)             | ثلاث خدمات: `mysql`، `api`، `web`. مستقل عن `compose.yaml` الخاص بالتطوير |
-| [`apps/api/Dockerfile`](../../apps/api/Dockerfile)                     | صورة الـ API                                                              |
-| [`apps/api/docker-entrypoint.sh`](../../apps/api/docker-entrypoint.sh) | تشغيل الـ API: `prisma migrate deploy` ثم الخادم                          |
-| [`apps/web/Dockerfile`](../../apps/web/Dockerfile)                     | صورة الواجهة (Next.js standalone)                                         |
-| [`.dockerignore`](../../.dockerignore)                                 | يستبعد `.env*` و`node_modules` وملفات البناء من سياق البناء               |
-| [`env.example`](env.example)                                           | قائمة المتغيرات بلا أسرار                                                 |
-| [`docs/trust-boundary.md`](../../docs/trust-boundary.md)               | حدود الثقة لعنوان IP العميل، والاختبار المطلوب عبر الوكيل الفعلي          |
+| الملف                                                                                                              | الغرض                                                   |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| [`compose.production.yaml`](../../compose.production.yaml)                                                         | خمس خدمات: `mysql`، `api`، `web`، `clamav`، `backup`    |
+| [`apps/api/Dockerfile`](../../apps/api/Dockerfile) + [`docker-entrypoint.sh`](../../apps/api/docker-entrypoint.sh) | الـ API: `prisma migrate deploy` (إضافية فقط) ثم الخادم |
+| [`apps/web/Dockerfile`](../../apps/web/Dockerfile)                                                                 | الواجهة (Next.js standalone)                            |
+| [`deploy/clamav/Dockerfile`](../clamav/Dockerfile)                                                                 | فاحص ClamAV (clamd) بإعداد حدود الفحص                   |
+| [`deploy/backup/`](../backup/README.md)                                                                            | النسخ الاحتياطي المشفر والاستعادة والتراجع              |
+| [`env.example`](env.example)                                                                                       | المتغيرات، بلا أسرار                                    |
+| [`docs/trust-boundary.md`](../../docs/trust-boundary.md)                                                           | حدود الثقة لعنوان IP                                    |
 
-## إعدادات Coolify المطلوبة
+## إعدادات Coolify
 
 **المورد:**
 
-1. مشروع مستقل باسم **lawhat-alnamathij**، وبيئة باسم `staging`.
-   - لا تُستخدم موارد Flowmax أو قواعده أو شبكاته، ولا يُعدَّل الوكيل المشترك.
-2. مورد جديد من نوع **Docker Compose** من مستودع `HassanRagab494/lawhat-alnamathij` على فرع `main`.
-3. الإعدادات:
+1. Docker Compose من `HassanRagab494/lawhat-alnamathij` على `main`.
    - Base Directory: `/`
-   - Docker Compose Location: `/compose.production.yaml`
-   - Build Pack: Docker Compose
-4. **Domains:** يُربط `https://forms.flowmaxsa.cloud` بخدمة **web** على المنفذ **3000** فقط.
-   - لا دومين لخدمتي `api` و`mysql`.
-   - يمكن استخدام نطاق فرعي للتجربة بدلًا منه، مع ضبط `WEB_ORIGIN` عليه.
-5. **المتغيرات:** حسب [`env.example`](env.example):
-   - `MYSQL_PASSWORD` و`MYSQL_ROOT_PASSWORD` كأسرار. `MYSQL_PASSWORD` بأحرف وأرقام فقط لأنها تدخل في `DATABASE_URL`.
-   - `WEB_ORIGIN` = الأصل الذي يفتحه المستخدم بالضبط، مع `https://` وبلا `/` في النهاية.
-6. لا تُفعَّل الخيارات التالية:
-   - «Connect To Predefined Network»: لا حاجة لربط الخدمات بشبكة Coolify العامة؛ يكفي ربط الوكيل بخدمة web.
-   - «Expose ports».
-   - أي منفذ منشور على المضيف لأي خدمة.
-7. **DNS:** سجل `forms.flowmaxsa.cloud` يشير إلى خادم Coolify. يغيّره المسؤول، ولم يُغيَّر في هذه المهمة.
+   - Compose Location: `/compose.production.yaml`
+2. **Domains:** خدمة `web` فقط. الإعداد الحالي `https://forms.flowmaxsa.cloud:3000` صحيح ويبقى كما هو.
+   - `:3000` هو منفذ الخدمة الداخلي الذي يوجّه إليه الوكيل، أما الرابط العام فبلا منفذ.
+   - لا دومين لـ `api` و`mysql` و`clamav` و`backup`.
+3. **المتغيرات** حسب [`env.example`](env.example):
 
-**النشر الأول والمدير:**
+   | المتغير                 | ملاحظة                              |
+   | ----------------------- | ----------------------------------- |
+   | `MYSQL_PASSWORD`        | سر                                  |
+   | `MYSQL_ROOT_PASSWORD`   | سر                                  |
+   | `WEB_ORIGIN`            |                                     |
+   | `BACKUP_DB_PASSWORD`    | سر، **جديد**                        |
+   | `BACKUP_ENCRYPTION_KEY` | سر، **جديد**؛ احفظ نسخة خارج الخادم |
 
-8. **النشر الأول:** تبني Coolify الصورتين، ثم تبدأ `mysql` (تخزين دائم في volume `lawha-mysql-data`)، ثم `api` بعد أن تصبح القاعدة سليمة. عند كل إقلاع يطبق `api` الأمر `prisma migrate deploy` فقط، فلا reset ولا `db push` ولا seed. تبدأ `web` بعد أن يصبح فحص صحة `api` ناجحًا.
-9. **المدير الأول:** لا تُنشأ حسابات تلقائيًا ولا توجد بيانات اختبار. من Terminal خدمة `api` في Coolify:
+4. لا «Expose ports» ولا منافذ منشورة على المضيف، ولا «Connect To Predefined Network».
 
+## الموارد (يجب التحقق قبل النشر)
+
+لم يكن لدي وصول للخادم، فلم أقس موارده.
+
+ClamAV يحمّل التواقيع في الذاكرة (نحو 1.2–1.5GB)، ولذلك له سقف صريح: `mem_limit 2g` و`cpus 1.0`، ويمكن ضبطهما بـ `CLAMAV_MEM_LIMIT` و`CLAMAV_CPUS`. وللنسخ الاحتياطي سقف `512m` و`0.5` CPU.
+
+**قبل النشر**، من الخادم دون تغيير أي خدمة:
+
+```bash
+free -h
+df -h /var/lib/docker
+docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}'
+```
+
+**الشرط:** ذاكرة متاحة ≥ 2.5GB بعد الخدمات الحالية، ومساحة قرص ≥ 10GB للملفات والنسخ.
+
+**إن لم يتحقق الشرط، القرار للمالك:**
+
+| الخيار             | النتيجة                                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (أ) ترقية الخادم   | تكلفة: قرار منك                                                                                                                                             |
+| (ب) النشر بلا فاحص | تُحذف خدمة `clamav` ومتغير `CLAMAV_HOST`. **رفع الملفات يبقى معطلًا**: نشر نموذج فيه سؤال ملفات يُرفض برسالة «رفع الملفات غير مفعّل»، ولا يُقبل ملف دون فحص |
+
+## خطوات النشر (بالترتيب)
+
+1. **نسخة احتياطية موثوقة للقاعدة الحالية** حسب [deploy/backup/README.md](../backup/README.md#النسخة-قبل-تحديث-الاستضافة-إلزامي-قبل-نشر-المرحلة-النهائية)، والتأكد بـ `gzip -t`.
+2. **الإعداد لمرة واحدة:**
+   - إنشاء حساب النسخ `lawha_backup` (`create-backup-user.sql`).
+   - إضافة السرين الجديدين في Coolify.
+3. **Redeploy** للمورد `lawhat-alnamathij-staging` فقط. لا Docker Cleanup، ولا إعادة تشغيل للخادم أو الوكيل.
+4. **سجل الـ API:** يجب أن يظهر `Applying migration 20261025000000_file_uploads` ثم `All migrations have been successfully applied`.
+5. **من Terminal خدمة `api`:**
    ```bash
-   node dist/cli/create-admin.js --username <اسم-المستخدم> --display-name "<الاسم الظاهر>"
+   node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>r.text()).then(console.log)"
    ```
-
-   تُطلب كلمة المرور تفاعليًا مرتين وهي مخفية. لا تُستخدم `INITIAL_ADMIN_PASSWORD` في متغيرات Coolify، ويرفض الأمر العمل إذا وُجد مدير مسبقًا.
+   والنتيجة المطلوبة `"database":"up"`.
+6. **من Terminal خدمة `clamav`** (بعد اكتمال تحميل التواقيع، وقد يستغرق دقائق):
+   ```bash
+   clamdcheck.sh && echo clamd-ok
+   ```
+7. **من Terminal خدمة `backup`:**
+   ```bash
+   /opt/lawha-backup/backup.sh && cat /backups/last-status.json
+   ```
+   ثم اختبار الاستعادة إلى قاعدة مؤقتة حسب دليل النسخ.
+8. **من جهاز خارج الخادم:**
+   ```bash
+   node scripts/check-forwarded-for.mjs --base https://forms.flowmaxsa.cloud
+   ```
+   المطلوب PASS للسطرين.
+9. **تجربة الملفات الحقيقية بنموذج اختبار واضح الاسم:**
+   - رفع PDF سليم ⇒ «جاهز».
+   - رفع ملف EICAR النصي ⇒ «رُفض الملف لأن الفحص اكتشف محتوى ضارًا» (هذا يثبت الفحص الحقيقي).
+   - إرسال، ثم تنزيل الملف بحساب يملك الصلاحية.
 
 ## الشبكات وحدود الثقة
 
 ```text
-الزائر ⇒ وكيل Coolify (Traefik) ⇒ web:3000 ─[backend: internal]─► api:4000 ─► mysql:3306
+الزائر ⇒ Traefik ⇒ web:3000 ─[backend: internal]─► api:4000 ─► mysql:3306
+                                                    └──────► clamav:3310 (الاسم lawha-clamav-backend)
+backup ─[backend]─► mysql:3306   (يقرأ volume الملفات للقراءة فقط)
 ```
 
-**الشبكات:**
+- **لا منافذ منشورة لأي خدمة.** `api` و`mysql` و`backup` على شبكة `backend` الداخلية فقط.
+- **`clamav`** على `default` أيضًا، لتحديث التواقيع (freshclam) فقط. لا router ولا دومين.
+- **`TRUST_PROXY = BACKEND_SUBNET`**؛ التفاصيل في `docs/trust-boundary.md`.
+- **نسخة `api` واحدة فقط**، لأن حدود المعدل في الذاكرة.
 
-- لا تملك أي خدمة `ports:`، وكل المنافذ داخلية (`expose`).
-- `api` و`mysql` موجودتان على شبكة `backend` وحدها. هذه الشبكة `internal: true` بلا خروج للإنترنت، وبلا دومين.
-- `web` موجودة على `default`، وهي الشبكة التي يصلها وكيل Coolify، وعلى `backend` أيضًا.
-- تصل `web` إلى الـ API عبر الاسم `lawha-api-backend`، وهو معرّف على شبكة `backend` فقط. لذلك يأتي الاتصال دائمًا من `BACKEND_SUBNET`.
-- `TRUST_PROXY` في `api` = `BACKEND_SUBNET` (افتراضيًا `10.213.47.0/28`). يرفض الـ API الإقلاع في الإنتاج إذا غاب `TRUST_PROXY` أو كان `true` أو `false` أو `*` أو شبكة شاملة أو عدد قفزات.
-- إذا أضافت Coolify خدمة `api` إلى شبكة الوكيل تلقائيًا، فلا يتغير الأمان: عناوين تلك الشبكة خارج `TRUST_PROXY`، فلا تُصدَّق منها `X-Forwarded-For`، ولا يوجد router إلى `api`.
+## التخزين الدائم (لا تحذف أي volume)
 
-**ما يجب أن يتحقق منه المسؤول في الوكيل المشترك (دون تعديله):**
-
-- مدخل `https` في Traefik لا يحتوي `forwardedHeaders.insecure=true`، ولا `trustedIPs` تشمل مصادر يصل إليها الزائر.
-- إن وجدت CDN (مثل Cloudflare) أمام Traefik، تُراجَع إعداداتها بحسب [`docs/trust-boundary.md`](../../docs/trust-boundary.md).
-- لماذا يكفي هذا: Traefik يضيف عنوان الاتصال الحقيقي أو يستبدل به الترويسة، وNext.js يمرر الترويسة، والـ API يثق بـ `web` وحدها. في الحالتين يأخذ Express العنوان الحقيقي، لأنه أقرب عنوان غير موثوق من اليمين.
-- الشرط الحاسم أن الزائر لا يصل إلى `web` أو `api` إلا عبر Traefik، والاختبار أدناه يثبت ذلك.
+| volume             | المحتوى                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `lawha-mysql-data` | قاعدة البيانات                                                                             |
+| `lawha-uploads`    | ملفات الردود. مجلد `files` بأسماء عشوائية، يكتبه الـ API وحده، ويقرؤه `backup` للقراءة فقط |
+| `lawha-backups`    | النسخ المشفرة وحالة آخر نسخة                                                               |
+| `lawha-clamav-db`  | تواقيع ClamAV                                                                              |
 
 ## فحوص الصحة
 
-| الخدمة  | الفحص                                                                                                |
-| ------- | ---------------------------------------------------------------------------------------------------- |
-| `mysql` | `mysqladmin ping`                                                                                    |
-| `api`   | `GET /api/health` يعيد 200 عند اتصال القاعدة، و503 عند انقطاعها. مهلة بدء 60 ثانية لتطبيق migrations |
-| `web`   | `GET /login` يعيد 200                                                                                |
+| الخدمة   | الفحص                                                                                  |
+| -------- | -------------------------------------------------------------------------------------- |
+| `mysql`  | `mysqladmin ping`                                                                      |
+| `api`    | `GET /api/health`. لا ينتظر جاهزية `clamav`، والرفع يُرفض برسالة واضحة حتى يجهز الفاحص |
+| `web`    | `GET /login`                                                                           |
+| `clamav` | `clamdcheck.sh` المضمّن في الصورة الرسمية                                              |
 
-وثائق `/api/docs` معطلة في الإنتاج (`API_DOCS_ENABLED=false`). الوثيقة الثابتة موجودة في `docs/openapi.json`.
+وثائق `/api/docs` معطلة في الإنتاج.
 
-## ما تحقق محليًا وما لم يتحقق
+## التراجع
 
-Docker غير مثبت على جهاز التطوير، فلم تُبنَ الصور ولم يُشغَّل `compose.production.yaml`. أي أن تشغيلها **NOT_RUN**.
-
-ما نُفذ دون Docker لمحاكاة مراحل الصور:
-
-| الفحص                                                                                               | النتيجة                                                                                                                   |
-| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `compose.production.yaml` يُقرأ كـ YAML صحيح؛ لا `ports` لأي خدمة؛ `api` و`mysql` على `backend` فقط | PASS                                                                                                                      |
-| مرحلة `deps`: `npm ci --omit=dev --workspace @lawha/api` في مجلد معزول                              | PASS: فيه `prisma` وPrisma Client، وليس فيه next وjest وnest CLI                                                          |
-| `prisma migrate deploy` من تلك الاعتماديات على `lawha_test`                                         | PASS: `No pending migrations to apply`                                                                                    |
-| تشغيل `node dist/main.js` بوضع الإنتاج دون `TRUST_PROXY` أو مع `TRUST_PROXY=true`                   | PASS: رفض الإقلاع برسالة واضحة                                                                                            |
-| تشغيله بإعداد صحيح                                                                                  | PASS: `/api/health` يعيد 200 مع `database: up`، و`/api/docs` و`/api/docs.json` يعيدان 404                                 |
-| بناء الواجهة بـ `NEXT_OUTPUT=standalone` و`API_ORIGIN=http://127.0.0.1:4100`                        | PASS: الوجهة مثبتة في `routes-manifest.json`                                                                              |
-| تشغيل `apps/web/server.js` من نسخة معزولة بتخطيط الصورة                                             | PASS: `/login` 200، و`/api/health` عبر الواجهة 200، و`/f/...` 200، و`/forms` تحويل 307 إلى الدخول، وملفات CSS الثابتة 200 |
-
-## البنود المفتوحة قبل الاستخدام الفعلي
-
-1. **بناء الصور وتشغيل الـ Compose على Coolify:** لم ينفذ، وهو أول خطوة في بيئة التجربة.
-2. **اختبار تزوير `X-Forwarded-For` عبر الوكيل الفعلي:** لم ينفذ. من جهاز خارج الخادم:
-
-   ```bash
-   node scripts/check-forwarded-for.mjs --base https://forms.flowmaxsa.cloud
-   ```
-
-   - المطلوب `PASS` للسطرين.
-   - يجب أن يفشل الاتصال من الخارج بالمنافذ 3000 و4000 و3306 على عنوان الخادم.
-
-3. **اختبار المتصفح** (375 و1280 بكسل): إنشاء نموذج، ثم نشر، ثم تعبئة دون جلسة، ثم إرسال ورقم مرجعي، ثم أخطاء التحقق وانقطاع الشبكة والإغلاق والتحديث أثناء التعبئة. لم ينفذ محليًا بقرار المالك، ويُنفذ على بيئة التجربة.
-4. **التنبيهات الأمنية للتبعيات:** ما زالت مفتوحة في [`docs/verification/dependency-advisories.md`](../../docs/verification/dependency-advisories.md)، ولم تُقبل نهائيًا.
-5. **النسخ الاحتياطي لـ volume `lawha-mysql-data`:** لم يُضبط بعد. يُضبط في Coolify أو على الخادم قبل إدخال بيانات حقيقية.
-6. **عدادات حدود المعدل في ذاكرة العملية:** لا يُشغَّل أكثر من نسخة واحدة من `api` حتى تُنقل العدادات إلى مخزن مشترك.
+انظر [deploy/backup/README.md](../backup/README.md#خطة-التراجع-تحافظ-على-البيانات). الـ migration إضافية ولا تُعكس، والتراجع يحافظ على كل البيانات والملفات.

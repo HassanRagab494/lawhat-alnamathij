@@ -4,6 +4,7 @@ import { useId, useRef, useState, type ReactNode } from 'react';
 import { validateAnswers, type AnswerValue, type RenderQuestion } from '@/lib/answer-validation';
 import { FILE_TYPE_LABELS } from '@/lib/question-limits';
 import { Alert, Button, EmptyState, SelectInput, TextArea, TextInput } from './ui';
+import { FileUploadControl, type UploadsController } from './file-upload-control';
 
 export type Answers = Record<string, AnswerValue>;
 
@@ -21,6 +22,8 @@ export interface PublicModeProps {
   notice?: ReactNode;
   /** يعطّل الإرسال (مثلًا حين يلزم تحديث النموذج أولًا). */
   submitDisabled?: boolean;
+  /** رفع الملفات الفعلي لأسئلة الملفات (الصفحة العامة فقط). */
+  uploads?: UploadsController;
 }
 
 /**
@@ -126,6 +129,7 @@ export function FormRenderer({
             question={q}
             value={answers[q.key]}
             error={errors[q.key]}
+            uploads={publicMode?.uploads}
             onChange={(v) => setAnswer(q.key, v)}
           />
         ))
@@ -219,9 +223,11 @@ function PreviewQuestion({
   question: q,
   value,
   error,
+  uploads,
   onChange,
 }: {
   question: RenderQuestion;
+  uploads?: UploadsController;
   value: AnswerValue;
   error?: string;
   onChange: (v: AnswerValue) => void;
@@ -356,6 +362,18 @@ function PreviewQuestion({
     }
     case 'FILE_UPLOAD': {
       const s = q.settings;
+      if (uploads) {
+        control = (
+          <FileUploadControl
+            id={id}
+            question={q}
+            describedBy={describedBy}
+            invalid={Boolean(error)}
+            controller={uploads}
+          />
+        );
+        break;
+      }
       control = (
         <div className="flex flex-col gap-2">
           <input
@@ -376,7 +394,7 @@ function PreviewQuestion({
             {s.maxFiles !== undefined && <li>العدد الأقصى للملفات: {s.maxFiles}</li>}
           </ul>
           <p className="text-xs font-semibold text-amber-900">
-            رفع الملفات الفعلي غير متاح بعد؛ هذا الحقل للعرض فقط.
+            في المعاينة لا يُرفع شيء؛ الرفع متاح على الرابط العام بعد النشر.
           </p>
         </div>
       );

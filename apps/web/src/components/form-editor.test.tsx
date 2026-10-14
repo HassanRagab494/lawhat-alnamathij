@@ -258,7 +258,7 @@ describe('FormRenderer', () => {
 
     const file = screen.getByLabelText('المرفق') as HTMLInputElement;
     expect(file.disabled).toBe(true);
-    expect(screen.getByText(/رفع الملفات الفعلي غير متاح بعد/)).toBeTruthy();
+    expect(screen.getByText(/في المعاينة لا يُرفع شيء/)).toBeTruthy();
     expect(within(document.body).getByText(/الحجم الأقصى لكل ملف: 5/)).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

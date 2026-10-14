@@ -3,24 +3,19 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { AuditModule } from './audit/audit.service';
 import { AuthModule } from './auth/auth.module';
+import { THROTTLE } from './common/throttle';
 import { ConfigModule } from './config/config.module';
 import { APP_ENV, AppEnv } from './config/env';
 import { DashboardModule } from './dashboard/dashboard.controller';
 import { FormsModule } from './forms/forms.module';
 import { PublicModule } from './public/public.module';
 import { ResponsesModule } from './responses/responses.module';
+import { FilesModule } from './files/files.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
-/** أسماء محددات المعدل؛ كل مسار يتخطى ما لا يخصه عبر @SkipThrottle. */
-export const THROTTLE = {
-  login: 'login',
-  submitIp: 'submitIp',
-  submitForm: 'submitForm',
-  responses: 'responses',
-  responsesExport: 'responsesExport',
-} as const;
+export { THROTTLE } from './common/throttle';
 
 /** مسارات الإدارة تُحسب لكل مستخدم (الحارس العام يضبط req.auth قبل حارس المعدل). */
 const perUser = (req: Record<string, unknown>) => {
@@ -51,6 +46,14 @@ const perUser = (req: Record<string, unknown>) => {
           getTracker: (req: Record<string, unknown>) =>
             `form:${String((req as unknown as Request).params?.publicId ?? '')}`,
         },
+        { name: THROTTLE.uploadIp, ttl: 60_000, limit: env.PUBLIC_UPLOAD_PER_IP_PER_MINUTE },
+        {
+          name: THROTTLE.uploadForm,
+          ttl: 60_000,
+          limit: env.PUBLIC_UPLOAD_PER_FORM_PER_MINUTE,
+          getTracker: (req: Record<string, unknown>) =>
+            `upload-form:${String((req as unknown as Request).params?.publicId ?? '')}`,
+        },
         {
           name: THROTTLE.responses,
           ttl: 60_000,
@@ -70,6 +73,7 @@ const perUser = (req: Record<string, unknown>) => {
     FormsModule,
     PublicModule,
     ResponsesModule,
+    FilesModule,
     DashboardModule,
   ],
   controllers: [HealthController],

@@ -133,7 +133,8 @@ const detail = {
       title: 'السيرة',
       description: null,
       required: false,
-      kind: 'file',
+      kind: 'files',
+      files: [{ id: 'file-1', name: 'سيرة <b>ذاتية</b>.pdf', size: 2048, kind: 'PDF' }],
     },
     {
       questionId: 'q5',
@@ -232,7 +233,11 @@ it('التفاصيل: كل نوع إجابة كنص آمن، دون أداة ت�
   expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeTruthy();
   expect(document.querySelector('img')).toBeNull();
   expect(screen.getByText('لم تُقدَّم إجابة (سؤال اختياري).')).toBeTruthy();
-  expect(screen.getByText(/رفع الملفات الفعلي غير متاح بعد/)).toBeTruthy();
+  // الملف: الاسم والحجم نصًا، ودون رابط تنزيل لمن لا يملك صلاحية التنزيل
+  expect(screen.getByText('سيرة <b>ذاتية</b>.pdf')).toBeTruthy();
+  expect(screen.getByText('2.0 كيلوبايت')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /تنزيل/ })).toBeNull();
+  expect(screen.getByText(/يحتاج صلاحية «تنزيل ملفات الردود»/)).toBeTruthy();
   expect(screen.getByText('-12.5')).toBeTruthy();
   expect(screen.getByText('(مختار)', { exact: false })).toBeTruthy();
   expect(screen.getByText('لم تتغير الحالة منذ الإرسال.')).toBeTruthy();
@@ -277,4 +282,12 @@ it('التفاصيل: رد غير موجود أو من نموذج آخر', async
   apiMock.mockRejectedValueOnce(new ApiError(404, 'NOT_FOUND', 'الرد غير موجود.'));
   render(<ResponseDetailPage />);
   expect(await screen.findByText('الرد غير موجود')).toBeTruthy();
+});
+
+it('التفاصيل: رابط تنزيل محمي (مسار الـ API لا رابط عام) لمن يملك صلاحية التنزيل', async () => {
+  state.me = user('SUPERVISOR', ['FORMS_VIEW', 'RESPONSES_VIEW', 'RESPONSES_FILES_DOWNLOAD']);
+  render(<ResponseDetailPage />);
+  const link = await screen.findByRole('link', { name: 'تنزيل سيرة <b>ذاتية</b>.pdf' });
+  expect(link.getAttribute('href')).toBe('/api/forms/form-1/responses/resp-1/files/file-1');
+  expect(link.hasAttribute('download')).toBe(true);
 });

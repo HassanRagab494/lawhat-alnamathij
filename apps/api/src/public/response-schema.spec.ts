@@ -185,18 +185,25 @@ describe('validateAgainstVersion', () => {
     }
   });
 
-  it('يرفض أي بيانات لسؤال ملفات', () => {
+  it('سؤال الملفات: مصفوفة معرّفات صالحة دون تكرار وضمن العدد، والإلزام', () => {
     const file: VersionQuestionForValidation = {
       id: id(10),
       type: 'FILE_UPLOAD',
       title: 'ملف',
-      required: false,
-      settings: {},
+      required: true,
+      settings: { allowedTypes: ['pdf'], maxFileSizeMb: 1, maxFiles: 2 },
       options: [],
     };
-    expect(errors([{ questionId: file.id, value: 'file.pdf' }], [file])[`answers.${file.id}`]).toBe(
-      'رفع الملفات غير متاح.',
-    );
+    const msg = (value: string | string[]) =>
+      errors([{ questionId: file.id, value }], [file])[`answers.${file.id}`];
+    expect(msg('file.pdf')).toBe('نوع الإجابة غير صحيح.');
+    expect(msg(['not-a-uuid'])).toBe('معرّف الملف غير صالح.');
+    expect(msg([id(20), id(20)])).toBe('تكرر الملف نفسه.');
+    expect(msg([id(20), id(21), id(22)])).toBe('الحد الأقصى 2 ملفات.');
+    expect(msg([])).toBe('هذا السؤال إجباري.');
+    expect(
+      validateAgainstVersion([file], [{ questionId: file.id, value: [id(20).toUpperCase()] }]),
+    ).toEqual([{ questionId: file.id, fileIds: [id(20)] }]);
   });
 });
 

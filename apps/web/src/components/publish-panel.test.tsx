@@ -89,7 +89,7 @@ it('requires saving local edits before publishing', () => {
   expect(screen.getByText(/احفظ التغييرات أولًا/)).toBeTruthy();
 });
 
-it('explains why empty or file-upload drafts cannot be published', () => {
+it('explains why empty drafts cannot be published; file questions are decided by the server', () => {
   renderPanel(makeForm({ questions: [] }), admin);
   expect(screen.getByText(/أضف سؤالًا واحدًا على الأقل/)).toBeTruthy();
   cleanup();
@@ -97,9 +97,10 @@ it('explains why empty or file-upload drafts cannot be published', () => {
     makeForm({ questions: [{ ...question, type: 'FILE_UPLOAD', title: 'السيرة' }] as never }),
     admin,
   );
-  expect(screen.getByText(/«السيرة» من نوع رفع ملفات/)).toBeTruthy();
+  // رفع الملفات منفذ؛ الخادم يمنع النشر فقط إن لم يكن الفاحص مضبوطًا ويعيد السبب في PUBLISH_BLOCKED
+  expect(screen.queryByText(/«السيرة» من نوع رفع ملفات/)).toBeNull();
   expect((screen.getByRole('button', { name: 'نشر النموذج' }) as HTMLButtonElement).disabled).toBe(
-    true,
+    false,
   );
 });
 

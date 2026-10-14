@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { Errors } from '../common/errors';
 import { lockForm, runFormTransaction } from '../forms/form-transaction';
 import type { QuestionTypeKey } from '../forms/questions/limits';
+import { UploadsService } from '../files/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { PublicFormDto, SubmitResultDto } from './public-dto';
 import { parseSubmitResponse, requestHash, validateAgainstVersion } from './response-schema';
@@ -46,7 +47,10 @@ export interface SubmitOutcome {
 
 @Injectable()
 export class PublicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploads: UploadsService,
+  ) {}
 
   /**
    * أحدث إصدار منشور فقط. لا يكشف المسودة أو المستخدمين أو الردود.
@@ -147,6 +151,11 @@ export class PublicService {
             })),
             input.answers,
           );
+          // الملفات: من جلسة التعبئة نفسها وللسؤال والإصدار نفسيهما، غير مرتبطة وغير منتهية؛ تُقفل حتى الربط.
+          const fileAnswers = answers
+            .filter((a) => a.fileIds)
+            .map((a) => ({ questionId: a.questionId, fileIds: a.fileIds! }));
+          await this.uploads.lockForSubmit(tx, input.fillSession, formId, latest.id, fileAnswers);
 
           const created = await tx.formResponse.create({
             data: {
@@ -168,8 +177,9 @@ export class PublicService {
                 })),
               },
             },
-            select: { referenceCode: true, submittedAt: true },
+            select: { id: true, referenceCode: true, submittedAt: true },
           });
+          await this.uploads.attach(tx, created.id, fileAnswers);
           return {
             replayed: false,
             result: {

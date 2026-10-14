@@ -15,6 +15,7 @@ import {
   type PublicForm,
   type SubmitResult,
 } from '@/lib/public-form';
+import { usePublicUploads } from './use-uploads';
 
 type LoadState =
   | { kind: 'loading' }
@@ -45,6 +46,18 @@ export function PublicFormView({ publicId }: { publicId: string }) {
   const attempt = useRef<{ key: string; fingerprint: string } | null>(null);
   const answersRef = useRef(answers);
   answersRef.current = answers;
+  const currentForm = state.kind === 'ready' ? state.form : null;
+  const uploads = usePublicUploads(publicId, currentForm);
+
+  /** الإجابات مع معرّفات الملفات المقبولة لكل سؤال ملفات (مصفوفة فارغة إن لم يُقبل شيء بعد). */
+  const withFiles = (form: PublicForm | null, base: PublicAnswers): PublicAnswers => {
+    if (!form) return base;
+    const out = { ...base };
+    for (const q of form.questions) {
+      if (q.type === 'FILE_UPLOAD') out[q.key] = uploads.readyIds(q.key);
+    }
+    return out;
+  };
 
   const fetchForm = useCallback(
     (signal?: AbortSignal) =>
@@ -74,7 +87,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
   }, [load]);
 
   // تنبيه المتصفح قبل مغادرة الصفحة وفيها إجابات لم تُرسل.
-  const hasUnsent = state.kind === 'ready' && hasAnyAnswer(answers);
+  const hasUnsent = state.kind === 'ready' && (hasAnyAnswer(answers) || uploads.any);
   useEffect(() => {
     if (!hasUnsent) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -86,7 +99,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
   }, [hasUnsent]);
 
   async function submit(form: PublicForm, current: PublicAnswers) {
-    if (inFlight.current) return;
+    if (inFlight.current || uploads.busy) return;
     inFlight.current = true;
     setSubmitting(true);
     setNotice(null);
@@ -96,6 +109,16 @@ export function PublicFormView({ publicId }: { publicId: string }) {
       attempt.current = { key: newIdempotencyKey(), fingerprint };
     }
     const payload = buildPayload(form, current, attempt.current.key);
+    if (
+      uploads.token() &&
+      payload.answers.some(
+        (a) =>
+          Array.isArray(a.value) &&
+          form.questions.some((q) => q.id === a.questionId && q.type === 'FILE_UPLOAD'),
+      )
+    ) {
+      payload.fillSession = uploads.token()!;
+    }
 
     try {
       const result = await api<SubmitResult>(
@@ -105,6 +128,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
       attempt.current = null;
       setAnswers({});
       setErrors({});
+      uploads.reset();
       setState({ kind: 'success', result, title: form.title });
       window.scrollTo({ top: 0 });
     } catch (error) {
@@ -162,8 +186,18 @@ export function PublicFormView({ publicId }: { publicId: string }) {
       setAnswers(carryOverAnswers(form, answersRef.current));
       setErrors({});
       attempt.current = null;
+      const hadFiles = uploads.any;
+      uploads.reset();
       setState({ kind: 'ready', form });
-      setNotice(null);
+      setNotice(
+        hadFiles
+          ? {
+              kind: 'general',
+              message:
+                'تغيّر النموذج، فأُزيلت الملفات المرفوعة سابقًا لأنها مرتبطة بالإصدار القديم. أعد رفعها قبل الإرسال.',
+            }
+          : null,
+      );
     } catch (error) {
       setNotice({
         kind: 'outdated',
@@ -199,7 +233,7 @@ export function PublicFormView({ publicId }: { publicId: string }) {
 
   const { form } = state;
 
-  if (!form.acceptingResponses && !hasAnyAnswer(answers)) {
+  if (!form.acceptingResponses && !hasAnyAnswer(answers) && !uploads.any) {
     return (
       <StatusCard
         title={form.title}
@@ -214,19 +248,35 @@ export function PublicFormView({ publicId }: { publicId: string }) {
       description={form.description}
       questions={toRenderQuestions(form)}
       publicMode={{
-        answers,
+        answers: withFiles(form, answers),
         onAnswersChange: setAnswers,
         errors,
         onErrorsChange: setErrors,
         submitting,
-        submitDisabled: notice?.kind === 'outdated' || !form.versionId,
+        submitDisabled: notice?.kind === 'outdated' || !form.versionId || uploads.busy,
+        uploads: {
+          items: uploads.items,
+          onAdd: (key, files) => {
+            if (errors[key])
+              setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== key)));
+            uploads.onAdd(key, files);
+          },
+          onRemove: uploads.onRemove,
+        },
         onSubmit: (current) => void submit(form, current),
-        notice: notice && (
-          <NoticeAlert
-            notice={notice}
-            refreshing={refreshing}
-            onRefresh={() => void refreshVersion()}
-          />
+        notice: (
+          <>
+            {uploads.busy && (
+              <Alert tone="info">انتظر اكتمال رفع الملفات وفحصها قبل الإرسال.</Alert>
+            )}
+            {notice && (
+              <NoticeAlert
+                notice={notice}
+                refreshing={refreshing}
+                onRefresh={() => void refreshVersion()}
+              />
+            )}
+          </>
         ),
       }}
     />

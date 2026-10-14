@@ -41,6 +41,8 @@ export const submitResponseSchema = z
   .object({
     versionId: uuid('معرّف الإصدار غير صالح.'),
     idempotencyKey: uuid('مفتاح الإرسال غير صالح.'),
+    /** رمز جلسة التعبئة؛ مطلوب فقط إن أُرفقت ملفات. لا يدخل في بصمة الطلب. */
+    fillSession: z.string().max(64, 'رمز جلسة التعبئة غير صالح.').optional(),
     answers: z
       .array(answer, { required_error: 'قائمة الإجابات مطلوبة.' })
       .max(L.maxQuestions, `الحد الأقصى ${L.maxQuestions} إجابة.`),
@@ -94,6 +96,8 @@ export interface NormalizedAnswer {
   numberValue?: string;
   dateValue?: Date;
   optionIds?: string[];
+  /** معرّفات ملفات مرفوعة؛ ملكيتها وصلاحيتها تُتحقق داخل معاملة الإرسال. */
+  fileIds?: string[];
 }
 
 const NUMBER_RE = /^-?\d+(\.\d+)?$/;
@@ -147,12 +151,6 @@ export function validateAgainstVersion(
     const fail = (message: string) => errors.push({ field, message });
     const raw = provided.get(q.id);
     const s = q.settings ?? {};
-
-    if (q.type === 'FILE_UPLOAD') {
-      // النشر يمنع أسئلة الملفات؛ هذه حماية إضافية من أي بيانات ملفات.
-      if (raw !== undefined) fail('رفع الملفات غير متاح.');
-      continue;
-    }
 
     const empty = raw === undefined || (Array.isArray(raw) ? raw.length === 0 : raw.trim() === '');
     if (empty) {
@@ -230,6 +228,19 @@ export function validateAgainstVersion(
         else out.push({ questionId: q.id, optionIds: [optionId] });
         break;
       }
+      case 'FILE_UPLOAD': {
+        if (!Array.isArray(raw)) {
+          fail('نوع الإجابة غير صحيح.');
+          break;
+        }
+        const ids = raw.map((v) => v.trim().toLowerCase());
+        const maxFiles = num(s, 'maxFiles') ?? 1;
+        if (ids.some((id) => !UUID.test(id))) fail('معرّف الملف غير صالح.');
+        else if (new Set(ids).size !== ids.length) fail('تكرر الملف نفسه.');
+        else if (ids.length > maxFiles) fail(`الحد الأقصى ${maxFiles} ملفات.`);
+        else out.push({ questionId: q.id, fileIds: ids });
+        break;
+      }
       case 'MULTIPLE_CHOICE': {
         if (!Array.isArray(raw)) {
           fail('نوع الإجابة غير صحيح.');
@@ -261,7 +272,7 @@ export function validateAgainstVersion(
  * مطبّعة: الإجابات مرتبة بمعرّف السؤال، النصوص بعد إزالة المسافات المحيطة، الخيارات مرتبة،
  * والإجابات الفارغة محذوفة؛ فإعادة إرسال الطلب نفسه تعطي البصمة نفسها.
  */
-export function requestHash(input: SubmitResponseInput): string {
+export function requestHash(input: Pick<SubmitResponseInput, 'versionId' | 'answers'>): string {
   const answers = input.answers
     .map((a) => {
       const value = Array.isArray(a.value)

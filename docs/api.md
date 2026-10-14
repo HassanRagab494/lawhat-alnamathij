@@ -6,40 +6,44 @@
 - كل طلب معدِّل يتطلب الترويسة `x-csrf-token` بقيمة Cookie `lp_csrf`، ويُرفض إن حمل Origin غير `WEB_ORIGIN`.
 - الأخطاء: `{ statusCode, code, message, fields?, details? }`.
 
-| الطريقة والمسار                                           | الوصف                                                                                                                       | الصلاحية           |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `GET /health`                                             | حالة التطبيق وقاعدة البيانات (200 أو 503)                                                                                   | عام                |
-| `POST /auth/login`                                        | تسجيل الدخول، يضبط Cookies الجلسة وCSRF                                                                                     | عام (محدود المعدل) |
-| `POST /auth/logout`                                       | إبطال الجلسة الحالية                                                                                                        | أي مستخدم مسجل     |
-| `GET /auth/me`                                            | المستخدم الحالي وصلاحياته الفعلية                                                                                           | أي مستخدم مسجل     |
-| `POST /auth/change-password`                              | تغيير كلمة المرور بعد التحقق من الحالية؛ يبطل الجلسات الأخرى                                                                | أي مستخدم مسجل     |
-| `GET /dashboard/summary`                                  | أرقام حقيقية حسب الصلاحيات (النماذج لمن يملك العرض، المستخدمون للمدير)                                                      | أي مستخدم مسجل     |
-| `GET /forms?search&status=active\|archived&page&pageSize` | قائمة النماذج                                                                                                               | `FORMS_VIEW`       |
-| `GET /forms/:id`                                          | تفاصيل نموذج                                                                                                                | `FORMS_VIEW`       |
-| `POST /forms`                                             | إنشاء نموذج (مسودة) `{title, description?}`                                                                                 | `FORMS_CREATE`     |
-| `PATCH /forms/:id`                                        | تعديل `{title, description?, revision}`؛ 409 عند تعارض المراجعة أو الأرشفة                                                  | `FORMS_EDIT`       |
-| `POST /forms/:id/archive`                                 | أرشفة                                                                                                                       | `FORMS_ARCHIVE`    |
-| `POST /forms/:id/restore`                                 | استعادة                                                                                                                     | `FORMS_ARCHIVE`    |
-| `GET /forms/:id/draft`                                    | المسودة الكاملة: بيانات النموذج + الأسئلة مرتبة بخياراتها ومعرّفاتها الثابتة                                                | `FORMS_VIEW`       |
-| `PUT /forms/:id/draft`                                    | حفظ المسودة كاملة في معاملة واحدة `{revision, title, description?, questions[]}` (انظر أدناه)                               | `FORMS_EDIT`       |
-| `POST /forms/:id/publish`                                 | نشر المسودة المحفوظة كإصدار ثابت `{revision, publishKey, openResponses?}` (انظر أدناه)                                      | `FORMS_PUBLISH`    |
-| `POST /forms/:id/responses/open`                          | فتح استقبال الردود (يتطلب إصدارًا منشورًا ونموذجًا غير مؤرشف)                                                               | `FORMS_INTAKE`     |
-| `POST /forms/:id/responses/close`                         | إغلاق استقبال الردود                                                                                                        | `FORMS_INTAKE`     |
-| `GET /public/forms/:publicId`                             | النموذج العام: آخر إصدار منشور بأسئلته، أو حالة الإغلاق دون أسئلة                                                           | عام بلا جلسة       |
-| `POST /public/forms/:publicId/responses`                  | إرسال رد `{versionId, idempotencyKey, answers[]}` ⇒ `{referenceCode, submittedAt}`                                          | عام (محدود المعدل) |
-| `GET /forms/:id/responses`                                | قائمة الردود: بحث بالرقم المرجعي، فلترة بالحالة والتاريخ والإصدار، ترتيب وترقيم                                             | `RESPONSES_VIEW`   |
-| `GET /forms/:id/responses/:responseId`                    | تفاصيل رد بأسئلة إصداره وسجل حالاته                                                                                         | `RESPONSES_VIEW`   |
-| `PATCH /forms/:id/responses/:responseId/status`           | تغيير حالة الرد `{status}`                                                                                                  | `RESPONSES_REVIEW` |
-| `GET /forms/:id/responses/export`                         | تصدير CSV بالفلاتر نفسها                                                                                                    | `RESPONSES_EXPORT` |
-| `GET /users?search&page&pageSize`                         | قائمة المستخدمين                                                                                                            | مدير النظام        |
-| `GET /users/permissions`                                  | فهرس الصلاحيات المتاحة                                                                                                      | مدير النظام        |
-| `GET /users/:id`                                          | تفاصيل مستخدم                                                                                                               | مدير النظام        |
-| `POST /users`                                             | إنشاء مشرف `{username, displayName, password, permissions[]}`                                                               | مدير النظام        |
-| `PATCH /users/:id`                                        | تعديل اسم المشرف و/أو صلاحياته (تسري فورًا)                                                                                 | مدير النظام        |
-| `POST /users/:id/activate`                                | تفعيل مشرف                                                                                                                  | مدير النظام        |
-| `POST /users/:id/deactivate`                              | تعطيل مشرف وإبطال جلساته                                                                                                    | مدير النظام        |
-| `POST /users/:id/reset-password`                          | `{newPassword}`؛ إعادة تعيين وإبطال جلساته                                                                                  | مدير النظام        |
-| `DELETE /users/:id`                                       | حذف مشرف (حذف ناعم): يختفي من القوائم والإحصاءات، يُمنع دخوله، تُبطل جلساته؛ يبقى سجل نماذجه وعملياته واسم المستخدم محجوزًا | مدير النظام        |
+| الطريقة والمسار                                           | الوصف                                                                                                                       | الصلاحية                   |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `GET /health`                                             | حالة التطبيق وقاعدة البيانات (200 أو 503)                                                                                   | عام                        |
+| `POST /auth/login`                                        | تسجيل الدخول، يضبط Cookies الجلسة وCSRF                                                                                     | عام (محدود المعدل)         |
+| `POST /auth/logout`                                       | إبطال الجلسة الحالية                                                                                                        | أي مستخدم مسجل             |
+| `GET /auth/me`                                            | المستخدم الحالي وصلاحياته الفعلية                                                                                           | أي مستخدم مسجل             |
+| `POST /auth/change-password`                              | تغيير كلمة المرور بعد التحقق من الحالية؛ يبطل الجلسات الأخرى                                                                | أي مستخدم مسجل             |
+| `GET /dashboard/summary`                                  | أرقام حقيقية حسب الصلاحيات (النماذج لمن يملك العرض، المستخدمون للمدير)                                                      | أي مستخدم مسجل             |
+| `GET /forms?search&status=active\|archived&page&pageSize` | قائمة النماذج                                                                                                               | `FORMS_VIEW`               |
+| `GET /forms/:id`                                          | تفاصيل نموذج                                                                                                                | `FORMS_VIEW`               |
+| `POST /forms`                                             | إنشاء نموذج (مسودة) `{title, description?}`                                                                                 | `FORMS_CREATE`             |
+| `PATCH /forms/:id`                                        | تعديل `{title, description?, revision}`؛ 409 عند تعارض المراجعة أو الأرشفة                                                  | `FORMS_EDIT`               |
+| `POST /forms/:id/archive`                                 | أرشفة                                                                                                                       | `FORMS_ARCHIVE`            |
+| `POST /forms/:id/restore`                                 | استعادة                                                                                                                     | `FORMS_ARCHIVE`            |
+| `GET /forms/:id/draft`                                    | المسودة الكاملة: بيانات النموذج + الأسئلة مرتبة بخياراتها ومعرّفاتها الثابتة                                                | `FORMS_VIEW`               |
+| `PUT /forms/:id/draft`                                    | حفظ المسودة كاملة في معاملة واحدة `{revision, title, description?, questions[]}` (انظر أدناه)                               | `FORMS_EDIT`               |
+| `POST /forms/:id/publish`                                 | نشر المسودة المحفوظة كإصدار ثابت `{revision, publishKey, openResponses?}` (انظر أدناه)                                      | `FORMS_PUBLISH`            |
+| `POST /forms/:id/responses/open`                          | فتح استقبال الردود (يتطلب إصدارًا منشورًا ونموذجًا غير مؤرشف)                                                               | `FORMS_INTAKE`             |
+| `POST /forms/:id/responses/close`                         | إغلاق استقبال الردود                                                                                                        | `FORMS_INTAKE`             |
+| `GET /public/forms/:publicId`                             | النموذج العام: آخر إصدار منشور بأسئلته، أو حالة الإغلاق دون أسئلة                                                           | عام بلا جلسة               |
+| `POST /public/forms/:publicId/responses`                  | إرسال رد `{versionId, idempotencyKey, answers[]}` ⇒ `{referenceCode, submittedAt}`                                          | عام (محدود المعدل)         |
+| `GET /forms/:id/responses`                                | قائمة الردود: بحث بالرقم المرجعي، فلترة بالحالة والتاريخ والإصدار، ترتيب وترقيم                                             | `RESPONSES_VIEW`           |
+| `GET /forms/:id/responses/:responseId`                    | تفاصيل رد بأسئلة إصداره وسجل حالاته                                                                                         | `RESPONSES_VIEW`           |
+| `PATCH /forms/:id/responses/:responseId/status`           | تغيير حالة الرد `{status}`                                                                                                  | `RESPONSES_REVIEW`         |
+| `GET /forms/:id/responses/export`                         | تصدير CSV بالفلاتر نفسها                                                                                                    | `RESPONSES_EXPORT`         |
+| `POST /public/forms/:publicId/upload-sessions`            | جلسة تعبئة مجهولة لرفع الملفات                                                                                              | عام (محدود المعدل)         |
+| `POST /public/forms/:publicId/files?questionId=`          | رفع ملف بالتدفق مع التحقق والفحص                                                                                            | عام بجلسة تعبئة            |
+| `DELETE /public/forms/:publicId/files/:fileId`            | إزالة ملف لم يُرسل                                                                                                          | عام بجلسة تعبئة            |
+| `GET /forms/:id/responses/:responseId/files/:fileId`      | تنزيل ملف مرفق كمرفق (attachment)                                                                                           | `RESPONSES_FILES_DOWNLOAD` |
+| `GET /users?search&page&pageSize`                         | قائمة المستخدمين                                                                                                            | مدير النظام                |
+| `GET /users/permissions`                                  | فهرس الصلاحيات المتاحة                                                                                                      | مدير النظام                |
+| `GET /users/:id`                                          | تفاصيل مستخدم                                                                                                               | مدير النظام                |
+| `POST /users`                                             | إنشاء مشرف `{username, displayName, password, permissions[]}`                                                               | مدير النظام                |
+| `PATCH /users/:id`                                        | تعديل اسم المشرف و/أو صلاحياته (تسري فورًا)                                                                                 | مدير النظام                |
+| `POST /users/:id/activate`                                | تفعيل مشرف                                                                                                                  | مدير النظام                |
+| `POST /users/:id/deactivate`                              | تعطيل مشرف وإبطال جلساته                                                                                                    | مدير النظام                |
+| `POST /users/:id/reset-password`                          | `{newPassword}`؛ إعادة تعيين وإبطال جلساته                                                                                  | مدير النظام                |
+| `DELETE /users/:id`                                       | حذف مشرف (حذف ناعم): يختفي من القوائم والإحصاءات، يُمنع دخوله، تُبطل جلساته؛ يبقى سجل نماذجه وعملياته واسم المستخدم محجوزًا | مدير النظام                |
 
 مدير النظام يملك كل الصلاحيات دائمًا. حسابه لا يُعدَّل عبر `/users/*` (403 `ADMIN_ACCOUNT_PROTECTED`).
 
@@ -241,6 +245,105 @@
 | التصدير                         | 5 في الدقيقة لكل مستخدم         | `RESPONSES_EXPORT_PER_MINUTE`     |
 
 تجاوز الحد ⇒ 429 `TOO_MANY_REQUESTS`. العدادات في ذاكرة العملية.
+
+## رفع الملفات (المرحلة النهائية)
+
+### المسار للزائر (دون حساب)
+
+1. **إنشاء جلسة:** `POST /public/forms/:publicId/upload-sessions` ⇒ `{token, expiresAt}`.
+   - جلسة مجهولة للنموذج المفتوح وإصداره الحالي، عمرها `UPLOAD_SESSION_TTL_MINUTES` (240 دقيقة افتراضيًا).
+   - يُخزَّن SHA-256 للرمز فقط، والرمز نفسه في ذاكرة الصفحة.
+2. **رفع ملف:** `POST /public/forms/:publicId/files?questionId=<id سؤال الملفات>`.
+   - الترويسات: `Content-Type: application/octet-stream`، و`X-Fill-Session: <token>`، و`X-File-Name: <encodeURIComponent(الاسم)>`.
+   - الجسم هو محتوى الملف ويُكتب بالتدفق إلى منطقة مؤقتة خاصة.
+   - لا يُقبل الملف إلا بعد كل الخطوات التالية:
+     - الحجم ضمن حد السؤال وحد الجلسة.
+     - تحديد النوع من **المحتوى الفعلي**، وأن يطابق الامتداد النوع.
+     - التحقق من بنية DOCX/XLSX وفكها فعليًا بحدود.
+     - التحقق من النص UTF-8.
+     - رفض المشفر.
+     - نجاح فحص ClamAV.
+   - يُعاد `{id, name, size, kind}`، ثم يُثبَّت الملف باسم تخزين عشوائي في volume خاص.
+3. **إزالة ملف قبل الإرسال:** `DELETE /public/forms/:publicId/files/:fileId`، من الجلسة نفسها فقط.
+4. **الإرسال:** في `POST /public/forms/:publicId/responses` تكون قيمة سؤال الملفات مصفوفة معرّفات الملفات، ويُضاف `fillSession: <token>`.
+   - داخل معاملة الإرسال تُقفل الملفات ويُتحقق أن كلًا منها:
+     - من الجلسة نفسها.
+     - للنموذج والإصدار والسؤال نفسها.
+     - غير مرتبط برد، وغير منتهٍ.
+   - بعد ذلك تُربط بالرد وإجابته.
+   - أي خلل ⇒ 400 على `answers.<questionId>`، وتبقى الملفات الصالحة للمحاولة التالية.
+
+### إعادة المحاولة والتنظيف
+
+**إعادة المحاولة:**
+
+- المفتاح نفسه والمحتوى نفسه، بما فيه الملفات ⇒ الرقم المرجعي الأصلي، دون رد جديد ودون نسخ للملفات.
+- المفتاح نفسه بملفات مختلفة ⇒ 409 `IDEMPOTENCY_KEY_REUSED`.
+- الملف المرتبط برد لا يُزال ولا يُربط برد آخر.
+
+**التنظيف:** كل 10 دقائق، ويشمل ملفات هذا النظام فقط:
+
+- الملفات **غير المرتبطة والمنتهية**: تُحذف من القاعدة بشرط `response_id IS NULL`، ثم من التخزين.
+- الجلسات المنتهية.
+- الأجزاء المؤقتة المقطوعة الأقدم من ساعة، وبنمط أسمائه فقط.
+
+قفل الإرسال يمنع حذف ملف أثناء ربطه.
+
+### الأنواع والتحقق
+
+| النوع                    | التحقق من المحتوى                                                                                                                                                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PDF                      | يبدأ بـ `%PDF-`، ويُرفض وجود `/Encrypt`                                                                                                                                                                                                 |
+| JPG / PNG / WEBP         | التوقيع الثنائي                                                                                                                                                                                                                         |
+| DOCX / XLSX              | حاوية ZIP فيها `[Content_Types].xml` و`word/document.xml` أو `xl/workbook.xml`. يُرفض: ZIP64، والعناصر المشفرة، والمسارات الخطرة، وأكثر من 2000 عنصر. **فك فعلي** بحد 50MB للعنصر و100MB للمجموع، ونسبة ضغط ≤ 100 للعناصر الأكبر من 1MB |
+| TXT                      | UTF-8 صالح (BOM اختياري) دون NUL أو محارف تحكم ثنائية                                                                                                                                                                                   |
+| صيغ Office القديمة (OLE) | مرفوضة: قد تكون مشفرة ويتعذر فحصها                                                                                                                                                                                                      |
+
+الاسم الأصلي يُنظَّف للعرض فقط: يُزال المسار ومحارف التحكم والاتجاه والمحارف المحجوزة. مسار التخزين لا يُشتق منه أبدًا.
+
+### رموز الأخطاء الخاصة بالرفع
+
+| code                                      | الحالة | المعنى                                                                     |
+| ----------------------------------------- | ------ | -------------------------------------------------------------------------- |
+| `UPLOADS_UNAVAILABLE`                     | 503    | لا فاحص مضبوط على الخادم؛ الرفع معطل                                       |
+| `FILL_SESSION_INVALID`                    | 401    | جلسة مفقودة أو منتهية أو لنموذج آخر                                        |
+| `FILE_REJECTED`                           | 400    | نوع غير مسموح، أو امتداد لا يطابق المحتوى، أو ملف مشفر أو تالف أو ZIP bomb |
+| `FILE_TOO_LARGE` / `SESSION_UPLOAD_LIMIT` | 413    | حد الملف أو حد الجلسة الإجمالي                                             |
+| `FILE_COUNT_LIMIT`                        | 409    | بلغ عدد الملفات حد السؤال                                                  |
+| `FILE_INFECTED`                           | 422    | الفحص اكتشف محتوى ضارًا                                                    |
+| `SCAN_UNAVAILABLE`                        | 503    | الفاحص متعطل أو انتهت مهلته؛ **لم يُقبل الملف**، ويمكن إعادة المحاولة      |
+| `STORAGE_FULL`                            | 507    | بلغ التخزين حد `UPLOAD_STORAGE_MAX_GB`                                     |
+| `UPLOAD_INTERRUPTED`                      | 400    | انقطع الرفع؛ حُذف الجزء المكتوب                                            |
+
+عند الرفض المبكر قبل قراءة الجسم يستهلك الخادم باقي الطلب (حتى 32MB أو 15 ثانية)، فتصل رسالة الخطأ بدل قطع الاتصال.
+
+**النشر:** سؤال الملفات قابل للنشر فقط حين يكون الفاحص مضبوطًا (`CLAMAV_HOST`). وإلا يُرفض النشر بسبب واضح في `PUBLISH_BLOCKED`.
+
+### تنزيل الملفات (الإدارة)
+
+`GET /forms/:id/responses/:responseId/files/:fileId`
+
+- **الصلاحيات:** `FORMS_VIEW` و`RESPONSES_VIEW` و`RESPONSES_FILES_DOWNLOAD`. الأخيرة جديدة، تتطلب `RESPONSES_VIEW`، المدير يملكها تلقائيًا والمشرف بمنح صريح.
+- الملف يجب أن يخص الرد والنموذج في المسار، وإلا 404.
+- **الرؤوس:**
+  - `Content-Type: application/octet-stream`
+  - `Content-Disposition: attachment` مع اسم UTF-8
+  - `Cache-Control: no-store, private`
+  - `X-Content-Type-Options: nosniff`
+  - `Content-Security-Policy: default-src 'none'; sandbox`
+- لا عرض داخل المتصفح ولا روابط عامة دائمة. يُسجَّل في التدقيق `response.file_downloaded` (المعرّفات فقط).
+- **تفاصيل الرد:** نوع الإجابة `files` مع `[{id, name, size, kind}]`، أو `empty` لسؤال اختياري بلا ملفات.
+- **تصدير CSV:** يضيف عمود سؤال الملفات بأسماء الملفات فقط، مفصولة بـ «، »، دون روابط ولا مسارات ولا رموز.
+
+### حدود مكافحة الإساءة للرفع
+
+| الحد                        | الافتراضي                       |
+| --------------------------- | ------------------------------- |
+| حجم الملف                   | حسب إعداد السؤال (حتى 25MB)     |
+| مجموع ملفات الجلسة          | 100MB (`UPLOAD_SESSION_MAX_MB`) |
+| الرفع وإنشاء الجلسات لكل IP | 30 في الدقيقة                   |
+| الرفع لكل نموذج             | 300 في الدقيقة                  |
+| سعة التخزين الإجمالية       | 20GB (`UPLOAD_STORAGE_MAX_GB`)  |
 
 ## رموز الأخطاء الشائعة
 

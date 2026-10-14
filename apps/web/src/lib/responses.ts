@@ -37,7 +37,14 @@ export interface ResponseList {
   meta: PageMeta;
 }
 
-export type AnswerKind = 'empty' | 'text' | 'number' | 'date' | 'choice' | 'file';
+export type AnswerKind = 'empty' | 'text' | 'number' | 'date' | 'choice' | 'files';
+
+export interface AnswerFile {
+  id: string;
+  name: string;
+  size: number;
+  kind: string;
+}
 
 export interface AnswerView {
   questionId: string;
@@ -49,6 +56,7 @@ export interface AnswerView {
   kind: AnswerKind;
   value?: string;
   options?: { label: string; selected: boolean }[];
+  files?: AnswerFile[];
 }
 
 export interface StatusChange {

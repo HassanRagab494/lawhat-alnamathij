@@ -1,4 +1,5 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import type { Readable } from 'node:stream';
 import { Prisma, ResponseStatus } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext } from '../auth/auth-context';
@@ -7,6 +8,8 @@ import { AppError, Errors } from '../common/errors';
 import { pageMeta } from '../common/pagination';
 import { runFormTransaction } from '../forms/form-transaction';
 import type { QuestionTypeKey } from '../forms/questions/limits';
+import { FILE_STORAGE } from '../files/uploads.service';
+import type { FileStorage } from '../files/storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { CsvBuilder, EXPORT_MAX_ROWS, csvRow, riyadhDateTime } from './csv';
 import {
@@ -38,7 +41,15 @@ const detailInclude = {
       },
     },
   },
-  answers: { include: { options: { select: { optionId: true } } } },
+  answers: {
+    include: {
+      options: { select: { optionId: true } },
+      files: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, originalName: true, sizeBytes: true, kind: true },
+      },
+    },
+  },
   statusChanges: {
     orderBy: [{ changedAt: 'asc' }, { id: 'asc' }],
     include: { changedBy: { select: { displayName: true } } },
@@ -67,8 +78,20 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
       description: q.description,
       required: q.required,
     };
-    if (q.type === 'FILE_UPLOAD') return { ...base, kind: 'file' };
     const a: AnswerRow | undefined = byQuestion.get(q.id);
+    if (q.type === 'FILE_UPLOAD') {
+      if (!a?.files.length) return { ...base, kind: 'empty' };
+      return {
+        ...base,
+        kind: 'files',
+        files: a.files.map((f) => ({
+          id: f.id,
+          name: f.originalName,
+          size: f.sizeBytes,
+          kind: f.kind,
+        })),
+      };
+    }
     if (!a) return { ...base, kind: 'empty' };
     if (a.textValue != null) return { ...base, kind: 'text', value: a.textValue };
     if (a.numberValue != null)
@@ -107,10 +130,51 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
 
 @Injectable()
 export class ResponsesService {
+  private readonly logger = new Logger('Responses');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Inject(FILE_STORAGE) private readonly storage: FileStorage,
   ) {}
+
+  /**
+   * ملف مرفق برد: يجب أن يخص الرد والنموذج في المسار، وأن يكون مرتبطًا فعلًا (اجتاز الفحص قبل الربط).
+   * لا روابط عامة؛ التنزيل عبر هذا المسار المحمي فقط، ويُسجَّل في التدقيق دون أي محتوى.
+   */
+  async openFile(
+    actor: AuthContext,
+    formId: string,
+    responseId: string,
+    fileId: string,
+    meta: RequestMeta,
+  ): Promise<{ name: string; size: number; stream: Readable }> {
+    const file = await this.prisma.uploadedFile.findFirst({
+      where: { id: fileId, formId, responseId, response: { formId } },
+      select: { id: true, storageKey: true, originalName: true, sizeBytes: true },
+    });
+    if (!file) {
+      await this.get(formId, responseId); // 404 للرد أو النموذج إن لم يوجدا
+      throw Errors.notFound('الملف غير موجود.');
+    }
+    if (!(await this.storage.exists(file.storageKey))) {
+      this.logger.error(`stored file missing for record ${file.id}`);
+      throw Errors.notFound('الملف غير متاح في التخزين.');
+    }
+    await this.audit.record({
+      actorId: actor.userId,
+      action: 'response.file_downloaded',
+      entityType: 'response',
+      entityId: responseId,
+      details: { formId, fileId: file.id },
+      ipAddress: meta.ipAddress,
+    });
+    return {
+      name: file.originalName,
+      size: file.sizeBytes,
+      stream: this.storage.openRead(file.storageKey),
+    };
+  }
 
   private async assertForm(formId: string): Promise<void> {
     const form = await this.prisma.form.findUnique({ where: { id: formId }, select: { id: true } });
@@ -226,7 +290,7 @@ export class ResponsesService {
   /**
    * CSV بأعمدة ثابتة: الرقم المرجعي، تاريخ الإرسال (الرياض)، الحالة، الإصدار، ثم سؤال لكل عمود
    * (بالمفتاح المنطقي عبر الإصدارات، بعنوانه في أحدث إصدار يحتويه). يحترم الفلاتر نفسها.
-   * يُقرأ على دفعات ويُرفض قبل الإرسال إن تجاوز الحد في عدد الصفوف أو الحجم. أسئلة الملفات لا تُصدَّر.
+   * يُقرأ على دفعات ويُرفض قبل الإرسال إن تجاوز الحد في عدد الصفوف أو الحجم. أسئلة الملفات تُصدَّر بأسماء الملفات فقط (لا روابط ولا مسارات تخزين).
    */
   async exportCsv(
     actor: AuthContext,
@@ -283,7 +347,6 @@ export class ResponsesService {
     const labelByOption = new Map<string, string>();
     for (const v of versions) {
       for (const q of v.questions) {
-        if (q.type === 'FILE_UPLOAD') continue;
         logicalByQuestion.set(q.id, q.logicalId);
         q.options.forEach((o) => labelByOption.set(o.id, o.label));
         if (!seen.has(q.logicalId)) {
@@ -325,6 +388,7 @@ export class ResponsesService {
               numberValue: true,
               dateValue: true,
               options: { select: { optionId: true } },
+              files: { orderBy: { createdAt: 'asc' }, select: { originalName: true } },
             },
           },
         },
@@ -338,6 +402,7 @@ export class ResponsesService {
             a.textValue ??
             (a.numberValue != null ? decimalText(a.numberValue) : null) ??
             (a.dateValue != null ? dateText(a.dateValue) : null) ??
+            (a.files.length ? a.files.map((f) => f.originalName).join('، ') : null) ??
             a.options.map((o) => labelByOption.get(o.optionId) ?? '').join('، ');
           values.set(logical, value);
         }

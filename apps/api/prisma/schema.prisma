@@ -33,6 +33,19 @@ enum Permission {
   RESPONSES_REVIEW
   /// تصدير الردود CSV
   RESPONSES_EXPORT
+  /// تنزيل الملفات المرفقة بالردود (المرحلة النهائية)
+  RESPONSES_FILES_DOWNLOAD
+}
+
+/// أنواع الملفات المدعومة؛ تُحدَّد من المحتوى الفعلي لا من الامتداد.
+enum FileKind {
+  PDF
+  JPG
+  PNG
+  WEBP
+  DOCX
+  XLSX
+  TXT
 }
 
 model User {
@@ -231,10 +244,12 @@ model FormVersion {
   publishedById       String   @map("published_by_id") @db.Char(36)
   publishedAt         DateTime @default(now()) @map("published_at") @db.DateTime(3)
 
-  form        Form                  @relation(fields: [formId], references: [id], onDelete: Restrict)
-  publishedBy User                  @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
-  questions   FormVersionQuestion[]
-  responses   FormResponse[]
+  form         Form                  @relation(fields: [formId], references: [id], onDelete: Restrict)
+  publishedBy  User                  @relation("VersionPublishedBy", fields: [publishedById], references: [id], onDelete: Restrict)
+  questions    FormVersionQuestion[]
+  responses    FormResponse[]
+  fillSessions FillSession[]
+  files        UploadedFile[]
 
   @@unique([formId, versionNumber])
   @@unique([formId, publishKey])
@@ -257,6 +272,7 @@ model FormVersionQuestion {
   version FormVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
   options FormVersionOption[]
   answers FormAnswer[]
+  files   UploadedFile[]
 
   @@unique([versionId, logicalId])
   @@unique([id, versionId])
@@ -306,6 +322,7 @@ model FormResponse {
   version       FormVersion                @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)
   answers       FormAnswer[]
   statusChanges FormResponseStatusChange[]
+  files         UploadedFile[]
 
   @@unique([formId, idempotencyKey])
   @@unique([id, versionId])
@@ -329,6 +346,7 @@ model FormAnswer {
   response FormResponse        @relation(fields: [responseId, versionId], references: [id, versionId], onDelete: Cascade)
   question FormVersionQuestion @relation(fields: [questionId, versionId], references: [id, versionId], onDelete: Restrict)
   options  FormAnswerOption[]
+  files    UploadedFile[]
 
   @@unique([responseId, questionId])
   @@unique([id, questionId])
@@ -365,4 +383,67 @@ model FormResponseStatusChange {
   @@index([responseId, changedAt])
   @@index([changedById])
   @@map("form_response_status_changes")
+}
+
+/**
+ * جلسة تعبئة مجهولة قصيرة الصلاحية لرفع الملفات: مرتبطة بنموذج وإصدار، دون حساب للزائر.
+ * يُخزَّن تجزئة الرمز فقط؛ الرمز نفسه في ذاكرة صفحة الزائر.
+ */
+model FillSession {
+  id            String   @id @default(uuid(7)) @db.Char(36)
+  /// SHA-256 للرمز العشوائي (256 بت).
+  tokenHash     String   @unique @map("token_hash") @db.Char(64)
+  formId        String   @map("form_id") @db.Char(36)
+  versionId     String   @map("version_id") @db.Char(36)
+  /// مجموع البايتات المقبولة في الجلسة (حد إجمالي لكل جلسة).
+  uploadedBytes Int      @default(0) @map("uploaded_bytes")
+  uploadCount   Int      @default(0) @map("upload_count")
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  expiresAt     DateTime @map("expires_at") @db.DateTime(3)
+
+  version FormVersion    @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)
+  files   UploadedFile[]
+
+  @@index([expiresAt])
+  @@map("fill_sessions")
+}
+
+/**
+ * ملف مرفوع اجتاز التحقق من النوع الفعلي والحجم وفحص البرمجيات الخبيثة. محتواه في التخزين لا في MySQL.
+ * قبل الإرسال: مرتبط بجلسة وسؤال وينتهي بعد مدة؛ عند الإرسال: يُربط بالرد والإجابة ولا يُنظَّف أبدًا.
+ * المفاتيح المركبة تمنع ربطه بسؤال من إصدار آخر أو بإجابة سؤال آخر أو برد إصدار آخر.
+ */
+model UploadedFile {
+  id            String    @id @default(uuid(7)) @db.Char(36)
+  fillSessionId String?   @map("fill_session_id") @db.Char(36)
+  formId        String    @map("form_id") @db.Char(36)
+  versionId     String    @map("version_id") @db.Char(36)
+  questionId    String    @map("question_id") @db.Char(36)
+  /// اسم تخزين عشوائي (لا يُشتق من اسم الملف)؛ لا يظهر للمستخدم.
+  storageKey    String    @unique @map("storage_key") @db.VarChar(64)
+  /// الاسم الأصلي بعد التنظيف، للعرض فقط.
+  originalName  String    @map("original_name") @db.VarChar(255)
+  sizeBytes     Int       @map("size_bytes")
+  kind          FileKind
+  sha256        String    @db.Char(64)
+  scanEngine    String    @map("scan_engine") @db.VarChar(120)
+  scannedAt     DateTime  @map("scanned_at") @db.DateTime(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  /// موعد التنظيف إن لم يُربط برد؛ يُتجاهل بعد الربط.
+  expiresAt     DateTime  @map("expires_at") @db.DateTime(3)
+  responseId    String?   @map("response_id") @db.Char(36)
+  answerId      String?   @map("answer_id") @db.Char(36)
+  attachedAt    DateTime? @map("attached_at") @db.DateTime(3)
+
+  fillSession FillSession?        @relation(fields: [fillSessionId], references: [id], onDelete: SetNull)
+  version     FormVersion         @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)
+  question    FormVersionQuestion @relation(fields: [questionId, versionId], references: [id, versionId], onDelete: Restrict)
+  response    FormResponse?       @relation(fields: [responseId, versionId], references: [id, versionId], onDelete: Restrict)
+  answer      FormAnswer?         @relation(fields: [answerId, questionId], references: [id, questionId], onDelete: Restrict)
+
+  @@index([fillSessionId, questionId])
+  @@index([responseId])
+  @@index([expiresAt, responseId])
+  @@index([formId, createdAt])
+  @@map("uploaded_files")
 }

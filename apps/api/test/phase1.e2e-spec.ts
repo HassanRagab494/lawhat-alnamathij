@@ -127,6 +127,7 @@ describe('المرحلة الأولى', () => {
       'RESPONSES_VIEW',
       'RESPONSES_REVIEW',
       'RESPONSES_EXPORT',
+      'RESPONSES_FILES_DOWNLOAD',
     ]);
     // الجلسة مخزنة كتجزئة فقط
     const token = sessionCookie.split(';')[0]!.split('=')[1]!;

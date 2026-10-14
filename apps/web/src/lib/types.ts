@@ -9,7 +9,8 @@ export type Permission =
   | 'FORMS_INTAKE'
   | 'RESPONSES_VIEW'
   | 'RESPONSES_REVIEW'
-  | 'RESPONSES_EXPORT';
+  | 'RESPONSES_EXPORT'
+  | 'RESPONSES_FILES_DOWNLOAD';
 export type UserRole = 'ADMIN' | 'SUPERVISOR';
 
 export interface Me {

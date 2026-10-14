@@ -34,6 +34,11 @@ export const PERMISSION_OPTIONS: { key: Permission; label: string; hint: string 
     label: 'تصدير الردود',
     hint: 'تنزيل الردود ملف CSV.',
   },
+  {
+    key: 'RESPONSES_FILES_DOWNLOAD',
+    label: 'تنزيل ملفات الردود',
+    hint: 'تنزيل الملفات التي أرفقها المرسلون (بعد فحصها).',
+  },
 ];
 
 export const PERMISSION_LABELS = Object.fromEntries(
@@ -50,6 +55,7 @@ const REQUIRES: Partial<Record<Permission, Permission>> = {
   RESPONSES_VIEW: 'FORMS_VIEW',
   RESPONSES_REVIEW: 'RESPONSES_VIEW',
   RESPONSES_EXPORT: 'RESPONSES_VIEW',
+  RESPONSES_FILES_DOWNLOAD: 'RESPONSES_VIEW',
 };
 
 /**

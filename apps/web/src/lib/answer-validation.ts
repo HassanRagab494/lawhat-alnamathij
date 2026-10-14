@@ -35,8 +35,16 @@ function isEmpty(v: AnswerValue): boolean {
 
 /** يتحقق من إجابة واحدة حسب إعدادات السؤال. يعيد رسالة عربية أو null. */
 export function validateAnswer(q: RenderQuestion, value: AnswerValue): string | null {
-  // رفع الملفات غير متاح في هذه المرحلة؛ لا يُتحقق منه في المعاينة.
-  if (q.type === 'FILE_UPLOAD') return null;
+  if (q.type === 'FILE_UPLOAD') {
+    // في المعاينة لا يُرفع شيء؛ القيمة في الصفحة العامة هي معرّفات الملفات المقبولة.
+    if (value === undefined) return null;
+    const files = Array.isArray(value) ? value : [];
+    if (!files.length) return q.required ? 'هذا السؤال إجباري؛ أرفق ملفًا واحدًا على الأقل.' : null;
+    if (q.settings.maxFiles !== undefined && files.length > q.settings.maxFiles) {
+      return `الحد الأقصى ${q.settings.maxFiles} ملفات.`;
+    }
+    return null;
+  }
   if (isEmpty(value)) return q.required ? 'هذا السؤال إجباري.' : null;
   const s = q.settings;
 

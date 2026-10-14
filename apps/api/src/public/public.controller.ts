@@ -9,7 +9,8 @@ import {
   ApiTags,
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
-import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { THROTTLE, onlyThrottle } from '../common/throttle';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators';
 import { PublicFormDto, SubmitResponseDto, SubmitResultDto } from './public-dto';
@@ -40,7 +41,7 @@ export class PublicController {
   @Post(':publicId/responses')
   @Public()
   @UseGuards(ThrottlerGuard)
-  @SkipThrottle({ login: true, responses: true, responsesExport: true })
+  @onlyThrottle(THROTTLE.submitIp, THROTTLE.submitForm)
   @ApiOperation({
     summary: 'إرسال رد',
     description:

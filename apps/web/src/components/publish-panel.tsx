@@ -19,13 +19,6 @@ export function localPublishBlockers(form: FormDraft): string[] {
   const reasons: string[] = [];
   if (form.isArchived) reasons.push('النموذج مؤرشف؛ استعده أولًا.');
   if (form.questions.length === 0) reasons.push('أضف سؤالًا واحدًا على الأقل واحفظ المسودة.');
-  form.questions.forEach((q, i) => {
-    if (q.type === 'FILE_UPLOAD') {
-      reasons.push(
-        `السؤال ${i + 1} «${q.title}» من نوع رفع ملفات، والرفع الفعلي غير متاح بعد؛ احذفه أو غيّر نوعه ثم احفظ.`,
-      );
-    }
-  });
   return reasons;
 }
 
