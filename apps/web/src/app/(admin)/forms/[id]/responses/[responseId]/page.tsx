@@ -2,6 +2,8 @@
 
 import { useParams, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
+import { FilePreview } from '@/components/file-preview';
+import { FlowmaxPanel } from '@/components/flowmax-panel';
 import { Forbidden, RequirePermission } from '@/components/guards';
 import {
   Alert,
@@ -49,7 +51,7 @@ function AnswerValue({
   downloadBase,
 }: {
   answer: AnswerView;
-  /** مسار تنزيل الملفات إن كان المستخدم يملك صلاحية التنزيل. */
+  /** مسار الملفات المحمي (للمعاينة والتنزيل) إن كان المستخدم يملك صلاحية ملفات الردود. */
   downloadBase: string | null;
 }) {
   switch (answer.kind) {
@@ -65,37 +67,44 @@ function AnswerValue({
           {(answer.files ?? []).map((f) => (
             <li
               key={f.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-smoke-200 bg-white/70 px-3 py-2 text-sm"
+              className="flex flex-col gap-2 rounded-lg border border-smoke-200 bg-white/70 px-3 py-2 text-sm"
             >
-              <span className="min-w-0">
-                <span dir="auto" className="break-all font-semibold text-ink">
-                  {f.name}
-                </span>
-                <span className="ms-2 text-xs text-muted">{formatBytes(f.size)}</span>
-                {f.malwareScanned === false && (
-                  <span
-                    className="ms-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900"
-                    title="قُبل بعد التحقق من النوع والحجم فقط؛ افتحه بحذر."
-                  >
-                    غير مفحوص ضد البرمجيات الخبيثة
-                  </span>
-                )}
-              </span>
               {downloadBase && (
-                <a
-                  href={`${downloadBase}/${f.id}`}
-                  download
-                  rel="noopener"
-                  className="min-h-9 rounded-lg px-3 py-1.5 text-xs font-semibold text-velvet-700 underline hover:bg-velvet-50"
-                  aria-label={`تنزيل ${f.name}`}
-                >
-                  تنزيل
-                </a>
+                <FilePreview file={f} src={`${downloadBase}/${f.id}?disposition=inline`} />
               )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0">
+                  <span dir="auto" className="break-all font-semibold text-ink">
+                    {f.name}
+                  </span>
+                  <span className="ms-2 text-xs text-muted">{formatBytes(f.size)}</span>
+                  {f.malwareScanned === false && (
+                    <span
+                      className="ms-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900"
+                      title="قُبل بعد التحقق من النوع والحجم فقط؛ افتحه بحذر."
+                    >
+                      غير مفحوص ضد البرمجيات الخبيثة
+                    </span>
+                  )}
+                </span>
+                {downloadBase && (
+                  <a
+                    href={`${downloadBase}/${f.id}`}
+                    download
+                    rel="noopener"
+                    className="min-h-9 rounded-lg px-3 py-1.5 text-xs font-semibold text-velvet-700 underline hover:bg-velvet-50"
+                    aria-label={`تنزيل ${f.name}`}
+                  >
+                    تنزيل
+                  </a>
+                )}
+              </div>
             </li>
           ))}
           {!downloadBase && (
-            <li className="text-xs text-muted">تنزيل الملفات يحتاج صلاحية «تنزيل ملفات الردود».</li>
+            <li className="text-xs text-muted">
+              معاينة الملفات وتنزيلها يحتاجان صلاحية «تنزيل ملفات الردود».
+            </li>
           )}
         </ul>
       );
@@ -296,6 +305,13 @@ function ResponseDetailView() {
             </Card>
           )}
           {message && <Alert tone={message.ok ? 'success' : 'error'}>{message.text}</Alert>}
+
+          <FlowmaxPanel
+            formId={id}
+            responseId={responseId}
+            canReview={canReview}
+            onApproved={reload}
+          />
 
           <Card className="h-fit p-5">
             <h2 className="mb-3 text-base font-bold text-velvet-900">سجل الحالات</h2>

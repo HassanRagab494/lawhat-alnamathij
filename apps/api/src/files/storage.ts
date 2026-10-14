@@ -16,7 +16,8 @@ export interface FileStorage {
   /** ينقل الملف المؤقت إلى التخزين الدائم بمفتاح عشوائي جديد. */
   commit(temp: TempFile): Promise<string>;
   removeTemp(temp: TempFile): Promise<void>;
-  openRead(key: string): Readable;
+  /** قراءة الملف كله أو مدى بايتات (start..end شاملًا) لطلبات Range في معاينة الفيديو. */
+  openRead(key: string, range?: { start: number; end: number }): Readable;
   exists(key: string): Promise<boolean>;
   remove(key: string): Promise<void>;
   /** يحذف الملفات المؤقتة الأقدم من olderThanMs (رفع مقطوع)؛ داخل المنطقة المؤقتة فقط. */
@@ -90,8 +91,8 @@ export class LocalDiskStorage implements FileStorage {
     await rm(join(this.tempDir, `${temp.id}.part`), { force: true });
   }
 
-  openRead(key: string): Readable {
-    return createReadStream(this.keyPath(key));
+  openRead(key: string, range?: { start: number; end: number }): Readable {
+    return createReadStream(this.keyPath(key), range);
   }
 
   async exists(key: string): Promise<boolean> {

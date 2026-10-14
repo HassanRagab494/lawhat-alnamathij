@@ -100,7 +100,14 @@ describe('toDetailDto', () => {
       { label: 'ب', selected: true },
     ]);
     expect(dto.answers[0]!.files).toEqual([
-      { id: 'fl1', name: 'سيرة.pdf', size: 1200, kind: 'PDF', malwareScanned: false },
+      {
+        id: 'fl1',
+        name: 'سيرة.pdf',
+        size: 1200,
+        kind: 'PDF',
+        malwareScanned: false,
+        previewable: false,
+      },
     ]);
     expect(dto.formTitle).toBe('العنوان الحالي');
     expect(dto.version.title).toBe('العنوان المنشور');

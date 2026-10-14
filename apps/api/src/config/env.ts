@@ -5,6 +5,10 @@ const booleanFromString = z
   .enum(['true', 'false'], { message: 'يجب أن تكون القيمة true أو false' })
   .transform((value) => value === 'true');
 
+/** قيمة فارغة (من compose بلا قيمة) تعامل كغير مضبوطة. */
+const blankAsUnset = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_NAME: z.string().trim().min(1).default('لوحة النماذج'),
@@ -58,7 +62,7 @@ const envSchema = z.object({
     .max(24 * 60)
     .default(240),
   /** الحد الإجمالي للملفات المقبولة في جلسة تعبئة واحدة. */
-  UPLOAD_SESSION_MAX_MB: z.coerce.number().int().min(1).max(1000).default(100),
+  UPLOAD_SESSION_MAX_MB: z.coerce.number().int().min(1).max(5000).default(300),
   /** الحد الإجمالي لحجم كل الملفات المخزنة؛ عند بلوغه يُرفض الرفع الجديد. */
   UPLOAD_STORAGE_MAX_GB: z.coerce.number().min(0.01).max(10_000).default(20),
   /** حد طلبات إدارة الردود (القائمة والتفاصيل وتغيير الحالة) لكل مستخدم في الدقيقة. */
@@ -73,6 +77,22 @@ const envSchema = z.object({
   TRUST_PROXY: z.string().trim().min(1).default('loopback'),
   /** وثائق /api/docs: مفعّلة افتراضيًا في التطوير ومعطّلة افتراضيًا في الإنتاج. */
   API_DOCS_ENABLED: booleanFromString.optional(),
+  /** ربط Flowmax: معطّل افتراضيًا. لا يُرسل أي رد قبل اعتماد الأدمن. */
+  FLOWMAX_ENABLED: blankAsUnset(booleanFromString.default('false')),
+  /** أصل API لـ Flowmax (مثل https://api.example.com)؛ مطلوب عند التفعيل. */
+  FLOWMAX_API_BASE_URL: blankAsUnset(z.string().trim().url().optional()),
+  /** رمز حساب تكامل مخصص في Flowmax بصلاحيات العقارات والطلبات فقط (سر؛ لا يُسجَّل). */
+  FLOWMAX_SERVICE_TOKEN: blankAsUnset(z.string().trim().min(20).optional()),
+  /** مهلة طلبات JSON إلى Flowmax. */
+  FLOWMAX_TIMEOUT_MS: blankAsUnset(z.coerce.number().int().min(1000).max(120_000).default(15_000)),
+  /** مهلة رفع كل ملف وسائط إلى Flowmax. */
+  FLOWMAX_MEDIA_TIMEOUT_MS: blankAsUnset(
+    z.coerce.number().int().min(5000).max(900_000).default(300_000),
+  ),
+  /** أصل موقع Flowmax العام لبناء روابط العقار (/property/{id}) والطلب (/properties/demands/{ref}). */
+  FLOWMAX_PUBLIC_SITE_URL: blankAsUnset(z.string().trim().url().optional()),
+  /** نشر العقار في Flowmax بعد إنشائه ورفع وسائطه (وإلا يبقى مسودة حتى ينشره فريق Flowmax). */
+  FLOWMAX_AUTO_PUBLISH: blankAsUnset(booleanFromString.default('false')),
 });
 
 export type AppEnv = Omit<z.infer<typeof envSchema>, 'API_DOCS_ENABLED'> & {
@@ -104,6 +124,22 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   } else {
     const trustError = trustProxyError(env.TRUST_PROXY, production);
     if (trustError) problems.push(`TRUST_PROXY: ${trustError}`);
+  }
+  if (env.FLOWMAX_ENABLED) {
+    for (const key of [
+      'FLOWMAX_API_BASE_URL',
+      'FLOWMAX_SERVICE_TOKEN',
+      'FLOWMAX_PUBLIC_SITE_URL',
+    ] as const) {
+      if (!env[key]) problems.push(`${key}: مطلوب عند FLOWMAX_ENABLED=true`);
+    }
+    if (
+      production &&
+      env.FLOWMAX_API_BASE_URL &&
+      !env.FLOWMAX_API_BASE_URL.startsWith('https://')
+    ) {
+      problems.push('FLOWMAX_API_BASE_URL: يجب أن يكون https في الإنتاج');
+    }
   }
   if (problems.length) {
     throw new EnvValidationError(

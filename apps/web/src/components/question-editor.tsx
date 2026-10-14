@@ -1,7 +1,13 @@
 'use client';
 
 import { useId } from 'react';
-import { moveItem, newKey, type EditorQuestion, type EditorSettings } from '@/lib/draft';
+import {
+  maxFileSizeFor,
+  moveItem,
+  newKey,
+  type EditorQuestion,
+  type EditorSettings,
+} from '@/lib/draft';
 import {
   FILE_TYPE_KEYS,
   FILE_TYPE_LABELS,
@@ -358,7 +364,7 @@ function TypeSettings({
               label="الحجم الأقصى لكل ملف (ميغابايت)"
               value={s.maxFileSizeMb}
               error={e('maxFileSizeMb')}
-              hint={`من 1 إلى ${L.fileMaxSizeMb}`}
+              hint={`من 1 إلى ${maxFileSizeFor(s.allowedTypes)}`}
               onChange={(v) => setSettings({ maxFileSizeMb: v })}
             />
             <NumberField

@@ -46,6 +46,8 @@ export interface AnswerFile {
   kind: string;
   /** false إن قُبل دون فحص برمجيات خبيثة. */
   malwareScanned?: boolean;
+  /** صورة أو فيديو يُعرض داخل الصفحة لمن يملك صلاحية الملفات. */
+  previewable?: boolean;
 }
 
 export interface AnswerView {

@@ -26,7 +26,11 @@ export type AuditAction =
   | 'form.restored'
   | 'response.status_changed'
   | 'responses.exported'
-  | 'response.file_downloaded';
+  | 'response.file_downloaded'
+  | 'response.file_previewed'
+  | 'response.flowmax_approved'
+  | 'response.flowmax_retried'
+  | 'form.flowmax_mapping_updated';
 
 export interface AuditEntry {
   actorId: string | null;

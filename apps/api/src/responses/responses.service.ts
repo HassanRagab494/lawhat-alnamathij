@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import { Prisma, ResponseStatus } from '@prisma/client';
+import { Prisma, ResponseStatus, type FileKind } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthContext } from '../auth/auth-context';
 import type { RequestMeta } from '../auth/decorators';
@@ -22,6 +22,7 @@ import {
   type ResponseListQueryDto,
   type UpdateStatusResultDto,
 } from './dto';
+import { canPreview, parseRange, type ByteRange, type FileDisposition } from './file-response';
 import { buildResponseWhere, responseOrder } from './filters';
 
 const FORM_NOT_FOUND = 'النموذج غير موجود.';
@@ -91,6 +92,7 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
           size: f.sizeBytes,
           kind: f.kind,
           malwareScanned: f.scanEngine !== NOT_SCANNED_ENGINE,
+          previewable: canPreview(f.kind),
         })),
       };
     }
@@ -150,31 +152,60 @@ export class ResponsesService {
     responseId: string,
     fileId: string,
     meta: RequestMeta,
-  ): Promise<{ name: string; size: number; stream: Readable }> {
+    disposition: FileDisposition = 'attachment',
+    rangeHeader?: string,
+  ): Promise<{
+    name: string;
+    size: number;
+    kind: FileKind;
+    range: ByteRange | undefined;
+    stream: Readable;
+  }> {
     const file = await this.prisma.uploadedFile.findFirst({
       where: { id: fileId, formId, responseId, response: { formId } },
-      select: { id: true, storageKey: true, originalName: true, sizeBytes: true },
+      select: { id: true, storageKey: true, originalName: true, sizeBytes: true, kind: true },
     });
     if (!file) {
       await this.get(formId, responseId); // 404 للرد أو النموذج إن لم يوجدا
       throw Errors.notFound('الملف غير موجود.');
     }
+    if (disposition === 'inline' && !canPreview(file.kind)) {
+      throw new AppError(
+        HttpStatus.BAD_REQUEST,
+        'PREVIEW_NOT_SUPPORTED',
+        'هذا النوع من الملفات لا يُعرض داخل الصفحة؛ نزّله بدلًا من ذلك.',
+      );
+    }
+    // المدى للمعاينة فقط (تقديم الفيديو والتنقل فيه)؛ التنزيل يُعاد كاملًا دائمًا
+    const parsed = disposition === 'inline' ? parseRange(rangeHeader, file.sizeBytes) : undefined;
+    if (parsed === 'unsatisfiable') {
+      throw new AppError(
+        HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+        'RANGE_NOT_SATISFIABLE',
+        'المدى المطلوب خارج حدود الملف.',
+      );
+    }
     if (!(await this.storage.exists(file.storageKey))) {
       this.logger.error(`stored file missing for record ${file.id}`);
       throw Errors.notFound('الملف غير متاح في التخزين.');
     }
-    await this.audit.record({
-      actorId: actor.userId,
-      action: 'response.file_downloaded',
-      entityType: 'response',
-      entityId: responseId,
-      details: { formId, fileId: file.id },
-      ipAddress: meta.ipAddress,
-    });
+    // طلبات المدى المتتالية لتشغيل فيديو واحد تُسجَّل مرة (عند بدايته) لا مع كل جزء
+    if (!parsed || parsed.start === 0) {
+      await this.audit.record({
+        actorId: actor.userId,
+        action: disposition === 'inline' ? 'response.file_previewed' : 'response.file_downloaded',
+        entityType: 'response',
+        entityId: responseId,
+        details: { formId, fileId: file.id },
+        ipAddress: meta.ipAddress,
+      });
+    }
     return {
       name: file.originalName,
       size: file.sizeBytes,
-      stream: this.storage.openRead(file.storageKey),
+      kind: file.kind,
+      range: parsed,
+      stream: this.storage.openRead(file.storageKey, parsed),
     };
   }
 

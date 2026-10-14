@@ -26,6 +26,8 @@ export const QUESTION_LIMITS = {
   dateMax: '2100-12-31',
   /** أقصى حجم يمكن ضبطه لكل ملف (ميغابايت). */
   fileMaxSizeMb: 25,
+  /** أقصى حجم يمكن ضبطه لكل ملف فيديو (ميغابايت)؛ يُسمح به فقط إن كان السؤال يقبل الفيديو، والصور والمستندات تبقى ضمن fileMaxSizeMb. */
+  videoMaxSizeMb: 100,
   /** أقصى عدد ملفات يمكن ضبطه للسؤال. */
   fileMaxCount: 10,
 } as const;
@@ -58,7 +60,20 @@ export const RESPONSE_REQUEST_MAX_BYTES = 512 * 1024;
 export const ANSWER_MAX_DECIMALS = 10;
 
 /** أنواع الملفات المسموح باختيارها فقط (قائمة آمنة؛ لا ملفات تنفيذية أو سكربتات). */
-export const FILE_TYPE_KEYS = ['pdf', 'jpg', 'png', 'webp', 'docx', 'xlsx', 'txt'] as const;
+export const FILE_TYPE_KEYS = [
+  'pdf',
+  'jpg',
+  'png',
+  'webp',
+  'docx',
+  'xlsx',
+  'txt',
+  'mp4',
+  'mov',
+  'webm',
+] as const;
+/** أنواع الفيديو بين مفاتيح الأنواع. */
+export const VIDEO_TYPE_KEYS: readonly FileTypeKey[] = ['mp4', 'mov', 'webm'];
 export type FileTypeKey = (typeof FILE_TYPE_KEYS)[number];
 
 export const QUESTION_TYPES = [

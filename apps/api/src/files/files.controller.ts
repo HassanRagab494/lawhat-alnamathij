@@ -39,7 +39,8 @@ class UploadedFileResultDto {
   @ApiProperty({ description: 'يُرسل ضمن قيمة إجابة سؤال الملفات' }) id!: string;
   @ApiProperty({ description: 'الاسم بعد التنظيف' }) name!: string;
   @ApiProperty() size!: number;
-  @ApiProperty({ enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT'] }) kind!: string;
+  @ApiProperty({ enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT', 'MP4', 'MOV', 'WEBM'] })
+  kind!: string;
 }
 
 const SESSION_HEADER = 'x-fill-session';
@@ -103,7 +104,7 @@ export class FilesController {
   @ApiOperation({
     summary: 'رفع ملف لسؤال ملفات',
     description:
-      'جسم الطلب هو محتوى الملف نفسه (application/octet-stream) بالتدفق. يُتحقق من الحجم والنوع الفعلي (لا الامتداد وحده) ويُفحص بـ ClamAV قبل القبول. الأخطاء: 413 FILE_TOO_LARGE أو SESSION_UPLOAD_LIMIT، 400 FILE_REJECTED، 422 FILE_INFECTED، 503 SCAN_UNAVAILABLE، 409 FILE_COUNT_LIMIT، 507 STORAGE_FULL.',
+      'جسم الطلب هو محتوى الملف نفسه (application/octet-stream) بالتدفق. يُتحقق من الحجم والنوع الفعلي (لا الامتداد وحده) ويُفحص ضد البرمجيات الخبيثة قبل القبول عند تفعيل الفحص (UPLOAD_SCAN_MODE=required). الفيديو MP4/MOV/WebM حتى 100MB بعد التحقق من بنيته. الأخطاء: 413 FILE_TOO_LARGE أو SESSION_UPLOAD_LIMIT، 400 FILE_REJECTED، 422 FILE_INFECTED، 503 SCAN_UNAVAILABLE، 409 FILE_COUNT_LIMIT، 507 STORAGE_FULL.',
   })
   @ApiConsumes('application/octet-stream')
   @ApiHeader({ name: SESSION_HEADER, required: true })

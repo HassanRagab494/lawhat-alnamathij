@@ -14,7 +14,7 @@ const SETTINGS_DOC = [
   'MULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options',
   `NUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى ${QUESTION_LIMITS.numberAbsMax}`,
   `DATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين ${QUESTION_LIMITS.dateMin} و${QUESTION_LIMITS.dateMax}`,
-  `FILE_UPLOAD: { allowedTypes (مطلوب: ${FILE_TYPE_KEYS.join(', ')}), maxFileSizeMb (مطلوب، 1-${QUESTION_LIMITS.fileMaxSizeMb}), maxFiles (مطلوب، 1-${QUESTION_LIMITS.fileMaxCount}) } — إعداد ومعاينة فقط، لا رفع فعلي`,
+  `FILE_UPLOAD: { allowedTypes (مطلوب: ${FILE_TYPE_KEYS.join(', ')}), maxFileSizeMb (مطلوب، 1-${QUESTION_LIMITS.fileMaxSizeMb}، وحتى ${QUESTION_LIMITS.videoMaxSizeMb} إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-${QUESTION_LIMITS.fileMaxCount}) }`,
 ].join('\n');
 
 export class QuestionOptionDto {

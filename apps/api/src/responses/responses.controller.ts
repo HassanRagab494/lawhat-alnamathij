@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Query,
@@ -17,6 +18,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProduces,
+  ApiQuery,
   ApiSecurity,
   ApiTags,
   ApiUnprocessableEntityResponse,
@@ -37,16 +39,13 @@ import {
   UpdateStatusResultDto,
 } from './dto';
 import { ResponsesService } from './responses.service';
+import { privateFileHeaders, type FileDisposition } from './file-response';
+
+export { contentDisposition } from './file-response';
 
 const formIdPipe = new ParseIdPipe('النموذج غير موجود.');
 const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
 const fileIdPipe = new ParseIdPipe('الملف غير موجود.');
-
-/** attachment دائمًا؛ اسم ASCII احتياطي واسم UTF-8 كامل وفق RFC 6266/5987. */
-export function contentDisposition(name: string): string {
-  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\;]/g, '_') || 'file';
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-}
 
 /**
  * إدارة ردود النموذج. كل مسار يتحقق من الصلاحية في الخادم ومن أن الرد يخص النموذج في المسار.
@@ -128,11 +127,11 @@ export class ResponsesController {
     Permission.RESPONSES_FILES_DOWNLOAD,
   )
   @ApiOperation({
-    summary: 'تنزيل ملف مرفق برد',
+    summary: 'تنزيل ملف مرفق برد أو معاينته',
     description:
-      'يتطلب RESPONSES_FILES_DOWNLOAD. الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). يُعاد دائمًا كمرفق (attachment) بنوع application/octet-stream، دون عرض داخل المتصفح ودون تخزين مؤقت.',
+      'يتطلب RESPONSES_FILES_DOWNLOAD للتنزيل والمعاينة معًا (وإلا 403). الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). disposition=attachment (الافتراضي): تنزيل. disposition=inline: معاينة الصور (JPG/PNG/WEBP) والفيديو (MP4/MOV/WebM) فقط مع دعم Range للفيديو؛ غيرها 400 PREVIEW_NOT_SUPPORTED. Content-Type الحقيقي، nosniff، CSP مقيدة، دون تخزين مؤقت.',
   })
-  @ApiProduces('application/octet-stream')
+  @ApiQuery({ name: 'disposition', required: false, enum: ['attachment', 'inline'] })
   @ApiOkResponse({ description: 'محتوى الملف' })
   @ApiNotFoundResponse({ description: 'النموذج أو الرد أو الملف غير موجود' })
   async download(
@@ -140,19 +139,31 @@ export class ResponsesController {
     @Param('id', formIdPipe) formId: string,
     @Param('responseId', responseIdPipe) responseId: string,
     @Param('fileId', fileIdPipe) fileId: string,
+    @Query('disposition') dispositionQuery: string | undefined,
+    @Headers('range') range: string | undefined,
     @RequestMetaData() meta: RequestMeta,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    const file = await this.responses.openFile(auth, formId, responseId, fileId, meta);
-    res.set({
-      'Content-Type': 'application/octet-stream',
-      'Content-Disposition': contentDisposition(file.name),
-      'Content-Length': String(file.size),
-      'Cache-Control': 'no-store, private',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; sandbox",
-      'Cross-Origin-Resource-Policy': 'same-origin',
-    });
+    const disposition: FileDisposition = dispositionQuery === 'inline' ? 'inline' : 'attachment';
+    const file = await this.responses.openFile(
+      auth,
+      formId,
+      responseId,
+      fileId,
+      meta,
+      disposition,
+      range,
+    );
+    res.set(privateFileHeaders(file.kind, file.name, disposition));
+    if (file.range) {
+      res.status(206);
+      res.set({
+        'Content-Range': `bytes ${file.range.start}-${file.range.end}/${file.size}`,
+        'Content-Length': String(file.range.end - file.range.start + 1),
+      });
+    } else {
+      res.set('Content-Length', String(file.size));
+    }
     return new StreamableFile(file.stream);
   }
 

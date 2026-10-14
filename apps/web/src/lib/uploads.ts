@@ -1,5 +1,10 @@
 import { ApiError, toApiError } from './api';
-import { FILE_TYPE_LABELS, type FileTypeKey } from './question-limits';
+import {
+  FILE_TYPE_LABELS,
+  QUESTION_LIMITS,
+  VIDEO_TYPE_KEYS,
+  type FileTypeKey,
+} from './question-limits';
 
 /** حالة ملف في الصفحة العامة: لا يُعد جاهزًا للإرسال إلا بعد قبول الخادم. */
 export type UploadStatus = 'uploading' | 'checking' | 'ready' | 'error';
@@ -24,7 +29,12 @@ export const EXTENSIONS: Record<FileTypeKey, string[]> = {
   docx: ['docx'],
   xlsx: ['xlsx'],
   txt: ['txt'],
+  mp4: ['mp4'],
+  mov: ['mov'],
+  webm: ['webm'],
 };
+
+const VIDEO_EXTENSIONS = VIDEO_TYPE_KEYS.flatMap((t) => EXTENSIONS[t]);
 
 export function acceptAttribute(types: FileTypeKey[] | undefined): string {
   return (types ?? []).flatMap((t) => EXTENSIONS[t].map((e) => `.${e}`)).join(',');
@@ -50,6 +60,10 @@ export function precheckFile(
   if (file.size === 0) return 'الملف فارغ.';
   const max = (settings.maxFileSizeMb ?? 1) * 1024 * 1024;
   if (file.size > max) return `حجم الملف يتجاوز الحد المسموح (${settings.maxFileSizeMb} ميغابايت).`;
+  // الحد الأكبر للفيديو فقط؛ الصور والمستندات تبقى ضمن الحد العام (كما في الخادم)
+  if (!VIDEO_EXTENSIONS.includes(ext) && file.size > QUESTION_LIMITS.fileMaxSizeMb * 1024 * 1024) {
+    return `حجم الملف يتجاوز الحد المسموح لغير الفيديو (${QUESTION_LIMITS.fileMaxSizeMb} ميغابايت).`;
+  }
   return null;
 }
 

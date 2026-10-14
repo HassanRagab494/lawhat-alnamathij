@@ -296,16 +296,25 @@ function FormDetails() {
         title={form.title}
         back={{ href: form.isArchived ? '/forms?status=archived' : '/forms', label: 'النماذج' }}
         actions={
-          canArchive &&
-          (form.isArchived ? (
-            <Button variant="secondary" onClick={() => setArchiveDialog('restore')}>
-              استعادة النموذج
-            </Button>
-          ) : (
-            <Button variant="danger" onClick={() => setArchiveDialog('archive')}>
-              أرشفة النموذج
-            </Button>
-          ))
+          (canEdit || canArchive) && (
+            <div className="flex flex-wrap gap-2">
+              {canEdit && (
+                <LinkButton href={`/forms/${form.id}/flowmax`} variant="secondary">
+                  ربط Flowmax
+                </LinkButton>
+              )}
+              {canArchive &&
+                (form.isArchived ? (
+                  <Button variant="secondary" onClick={() => setArchiveDialog('restore')}>
+                    استعادة النموذج
+                  </Button>
+                ) : (
+                  <Button variant="danger" onClick={() => setArchiveDialog('archive')}>
+                    أرشفة النموذج
+                  </Button>
+                ))}
+            </div>
+          )
         }
       />
 

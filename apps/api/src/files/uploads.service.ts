@@ -5,7 +5,8 @@ import type { Readable } from 'node:stream';
 import { AppError, Errors, type FieldError } from '../common/errors';
 import { APP_ENV, type AppEnv } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
-import { FileRejected, inspectFile } from './file-kind';
+import { QUESTION_LIMITS } from '../forms/questions/limits';
+import { FileRejected, VIDEO_KINDS, inspectFile } from './file-kind';
 import { extensionOf, sanitizeFileName } from './filename';
 import { ScanUnavailable, type MalwareScanner } from './scanner';
 import { TooLarge, type FileStorage, type TempFile } from './storage';
@@ -27,6 +28,9 @@ const EXT_BY_KEY: Record<string, string[]> = {
   docx: ['docx'],
   xlsx: ['xlsx'],
   txt: ['txt'],
+  mp4: ['mp4'],
+  mov: ['mov'],
+  webm: ['webm'],
 };
 
 export interface FileSettings {
@@ -265,6 +269,14 @@ export class UploadsService {
           HttpStatus.BAD_REQUEST,
           'FILE_REJECTED',
           error instanceof FileRejected ? error.message : 'تعذر التحقق من الملف؛ لم يُقبل.',
+        );
+      }
+      // الحد الأكبر للفيديو فقط؛ الصور والمستندات تبقى ضمن الحد العام حتى لو سمح السؤال بالفيديو
+      if (!VIDEO_KINDS.has(kind) && temp.size > QUESTION_LIMITS.fileMaxSizeMb * MB) {
+        throw err(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          'FILE_TOO_LARGE',
+          `حجم الملف يتجاوز الحد المسموح لغير الفيديو (${QUESTION_LIMITS.fileMaxSizeMb} ميغابايت).`,
         );
       }
       let scan;

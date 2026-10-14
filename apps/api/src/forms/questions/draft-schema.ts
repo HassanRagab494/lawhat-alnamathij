@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { Errors, type FieldError } from '../../common/errors';
 import { FORM_DESCRIPTION_MAX, FORM_TITLE_MAX } from '../dto';
-import { CHOICE_TYPES, FILE_TYPE_KEYS, QUESTION_LIMITS as L, type QuestionTypeKey } from './limits';
+import {
+  CHOICE_TYPES,
+  FILE_TYPE_KEYS,
+  QUESTION_LIMITS as L,
+  VIDEO_TYPE_KEYS,
+  type QuestionTypeKey,
+} from './limits';
 
 /**
  * المخطط الصارم لحفظ المسودة الكاملة (PUT /forms/:id/draft).
@@ -133,10 +139,21 @@ const fileSettings = z
       })
       .min(1, 'اختر نوع ملف واحدًا على الأقل.')
       .refine((list) => new Set(list).size === list.length, 'لا تكرر نوع الملف نفسه.'),
-    maxFileSizeMb: int(1, L.fileMaxSizeMb),
+    maxFileSizeMb: int(1, L.videoMaxSizeMb),
     maxFiles: int(1, L.fileMaxCount),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    // حتى videoMaxSizeMb فقط إن كان السؤال يقبل الفيديو؛ وإلا الحد العام للصور والمستندات
+    const video = value.allowedTypes.some((t) => VIDEO_TYPE_KEYS.includes(t));
+    if (!video && value.maxFileSizeMb > L.fileMaxSizeMb) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['maxFileSizeMb'],
+        message: `يجب ألا يزيد عن ${L.fileMaxSizeMb} (حتى ${L.videoMaxSizeMb} عند السماح بالفيديو).`,
+      });
+    }
+  });
 
 const option = z
   .object({

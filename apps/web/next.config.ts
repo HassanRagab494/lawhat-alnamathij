@@ -9,8 +9,8 @@ const standalone = process.env.NEXT_OUTPUT === 'standalone';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // رفع ملف حتى 25MB ثم فحصه قد يتجاوز مهلة وكيل /api الافتراضية (30 ثانية).
-  experimental: { proxyTimeout: 120_000 },
+  // رفع فيديو حتى 100MB على اتصال بطيء ثم التحقق منه يتجاوز مهلة وكيل /api الافتراضية (30 ثانية).
+  experimental: { proxyTimeout: 300_000 },
   ...(standalone && {
     output: 'standalone' as const,
     outputFileTracingRoot: path.join(__dirname, '..', '..'),

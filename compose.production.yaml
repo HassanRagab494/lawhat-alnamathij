@@ -74,10 +74,18 @@ services:
       # الرفع يعمل في وضع disabled المعلن دون خدمة فحص، مع بقاء قيود النوع والحجم.
       UPLOAD_DIR: /data/uploads
       UPLOAD_SESSION_TTL_MINUTES: ${UPLOAD_SESSION_TTL_MINUTES:-240}
-      UPLOAD_SESSION_MAX_MB: ${UPLOAD_SESSION_MAX_MB:-100}
+      UPLOAD_SESSION_MAX_MB: ${UPLOAD_SESSION_MAX_MB:-300}
       UPLOAD_STORAGE_MAX_GB: ${UPLOAD_STORAGE_MAX_GB:-20}
       PUBLIC_UPLOAD_PER_IP_PER_MINUTE: ${PUBLIC_UPLOAD_PER_IP_PER_MINUTE:-30}
       PUBLIC_UPLOAD_PER_FORM_PER_MINUTE: ${PUBLIC_UPLOAD_PER_FORM_PER_MINUTE:-300}
+      # ربط Flowmax: معطّل افتراضيًا. الرمز سر يُضبط في Coolify فقط (Is Secret)، ولا يُكتب في أي ملف.
+      FLOWMAX_ENABLED: ${FLOWMAX_ENABLED:-false}
+      FLOWMAX_API_BASE_URL: ${FLOWMAX_API_BASE_URL:-}
+      FLOWMAX_SERVICE_TOKEN: ${FLOWMAX_SERVICE_TOKEN:-}
+      FLOWMAX_PUBLIC_SITE_URL: ${FLOWMAX_PUBLIC_SITE_URL:-}
+      FLOWMAX_TIMEOUT_MS: ${FLOWMAX_TIMEOUT_MS:-15000}
+      FLOWMAX_MEDIA_TIMEOUT_MS: ${FLOWMAX_MEDIA_TIMEOUT_MS:-300000}
+      FLOWMAX_AUTO_PUBLISH: ${FLOWMAX_AUTO_PUBLISH:-false}
     volumes:
       - lawha-uploads:/data/uploads
     expose:

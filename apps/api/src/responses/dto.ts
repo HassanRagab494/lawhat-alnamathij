@@ -107,11 +107,18 @@ export class AnswerFileDto {
   @ApiProperty({ description: 'للتنزيل عبر مسار الملفات المحمي فقط' }) id!: string;
   @ApiProperty({ description: 'الاسم الأصلي بعد التنظيف' }) name!: string;
   @ApiProperty() size!: number;
-  @ApiProperty({ enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT'] }) kind!: string;
+  @ApiProperty({
+    enum: ['PDF', 'JPG', 'PNG', 'WEBP', 'DOCX', 'XLSX', 'TXT', 'MP4', 'MOV', 'WEBM'],
+  })
+  kind!: string;
   @ApiProperty({
     description: 'false إن قُبل الملف دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled)',
   })
   malwareScanned!: boolean;
+  @ApiProperty({
+    description: 'صورة أو فيديو يُعرض داخل الصفحة (disposition=inline)؛ غيرها تنزيل فقط',
+  })
+  previewable!: boolean;
 }
 
 export class AnswerOptionViewDto {

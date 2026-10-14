@@ -4,6 +4,7 @@ import {
   FORM_DESCRIPTION_MAX,
   FORM_TITLE_MAX,
   QUESTION_LIMITS as L,
+  VIDEO_TYPE_KEYS,
   isChoiceType,
   type FileTypeKey,
   type QuestionType,
@@ -74,6 +75,11 @@ export interface EditorDraft {
 }
 
 let keySeq = 0;
+/** الحد الأقصى القابل للضبط لحجم الملف: أكبر عند السماح بالفيديو (مطابق للخادم). */
+export function maxFileSizeFor(types: readonly FileTypeKey[]): number {
+  return types.some((t) => VIDEO_TYPE_KEYS.includes(t)) ? L.videoMaxSizeMb : L.fileMaxSizeMb;
+}
+
 export function newKey(): string {
   keySeq += 1;
   return `k${Date.now().toString(36)}${keySeq}`;
@@ -417,7 +423,7 @@ export function validateDraft(draft: EditorDraft): DraftErrors {
       case 'FILE_UPLOAD': {
         if (!s.allowedTypes.length) e[`${sp}.allowedTypes`] = 'اختر نوع ملف واحدًا على الأقل.';
         if (!s.maxFileSizeMb.trim()) e[`${sp}.maxFileSizeMb`] = 'هذا الحقل مطلوب.';
-        else checkInt(e, `${sp}.maxFileSizeMb`, s.maxFileSizeMb, 1, L.fileMaxSizeMb);
+        else checkInt(e, `${sp}.maxFileSizeMb`, s.maxFileSizeMb, 1, maxFileSizeFor(s.allowedTypes));
         if (!s.maxFiles.trim()) e[`${sp}.maxFiles`] = 'هذا الحقل مطلوب.';
         else checkInt(e, `${sp}.maxFiles`, s.maxFiles, 1, L.fileMaxCount);
         break;

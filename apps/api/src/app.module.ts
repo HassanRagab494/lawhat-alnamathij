@@ -11,6 +11,7 @@ import { FormsModule } from './forms/forms.module';
 import { PublicModule } from './public/public.module';
 import { ResponsesModule } from './responses/responses.module';
 import { FilesModule } from './files/files.module';
+import { FlowmaxModule } from './integrations/flowmax/flowmax.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
@@ -74,6 +75,7 @@ const perUser = (req: Record<string, unknown>) => {
     PublicModule,
     ResponsesModule,
     FilesModule,
+    FlowmaxModule,
     DashboardModule,
   ],
   controllers: [HealthController],

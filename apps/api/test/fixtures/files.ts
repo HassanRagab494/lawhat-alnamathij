@@ -73,6 +73,48 @@ export function buildZip(entries: ZipEntryInput[]): Buffer {
 
 const xml = (s: string) => Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>${s}`);
 
+/** عنصر ISO BMFF: طول 32 بت ثم النوع ثم المحتوى. */
+export function isoBox(type: string, payload: Buffer = Buffer.alloc(8)): Buffer {
+  const h = Buffer.alloc(8);
+  h.writeUInt32BE(8 + payload.length, 0);
+  h.write(type, 4, 'latin1');
+  return Buffer.concat([h, payload]);
+}
+
+/** فيديو MP4/MOV صغير البنية (ftyp بعلامة brand ثم العناصر المطلوبة). brand=null ⇒ بلا ftyp. */
+export function isoMedia(brand: string | null, boxes: string[] = ['moov', 'mdat']): Buffer {
+  const ftyp = brand
+    ? [isoBox('ftyp', Buffer.concat([Buffer.from(brand, 'latin1'), Buffer.alloc(4)]))]
+    : [];
+  return Buffer.concat([...ftyp, ...boxes.map((t) => isoBox(t, Buffer.alloc(32, 1)))]);
+}
+
+/** عنصر EBML: المعرّف كما هو ثم حجم بصيغة 8 بايت؛ size=null ⇒ حجم غير معروف (كل البتات 1). */
+export function ebml(id: number[], data: Buffer, size: number | null = data.length): Buffer {
+  const s = Buffer.alloc(8, 0xff);
+  if (size !== null) s.writeBigUInt64BE(BigInt(size), 0);
+  s[0] = 0x01;
+  return Buffer.concat([Buffer.from(id), s, data]);
+}
+
+/** فيديو WebM صغير البنية: ترويسة EBML (DocType) ثم Segment يحتوي Tracks وCluster. */
+export function webm(
+  opts: { docType?: string; tracks?: boolean; cluster?: boolean; unknownSizes?: boolean } = {},
+): Buffer {
+  const { docType = 'webm', tracks = true, cluster = true, unknownSizes = false } = opts;
+  const header = ebml([0x1a, 0x45, 0xdf, 0xa3], ebml([0x42, 0x82], Buffer.from(docType, 'latin1')));
+  const children = [
+    ebml([0x15, 0x49, 0xa9, 0x66], Buffer.alloc(16, 2)), // Info
+    ...(tracks ? [ebml([0x16, 0x54, 0xae, 0x6b], Buffer.alloc(24, 3))] : []),
+    ...(cluster
+      ? [ebml([0x1f, 0x43, 0xb6, 0x75], Buffer.alloc(64, 4), unknownSizes ? null : 64)]
+      : []),
+  ];
+  const body = Buffer.concat(children);
+  const segment = ebml([0x18, 0x53, 0x80, 0x67], body, unknownSizes ? null : body.length);
+  return Buffer.concat([header, segment]);
+}
+
 export const samples = {
   pdf: () =>
     Buffer.from(
@@ -111,6 +153,9 @@ export const samples = {
       { name: 'xl/workbook.xml', data: xml('<workbook/>') },
     ]),
   txt: () => Buffer.from('سطر عربي\nsecond line\twith tab\r\n', 'utf8'),
+  mp4: () => isoMedia('isom'),
+  mov: () => isoMedia('qt  '),
+  webm: () => webm(),
   /** ملف اختبار EICAR القياسي (غير ضار) لاختبار مسار الكشف. */
   eicar: () =>
     Buffer.from('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*', 'latin1'),

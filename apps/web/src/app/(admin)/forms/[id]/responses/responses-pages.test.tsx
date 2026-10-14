@@ -162,6 +162,9 @@ function routeApi(path: string) {
   if (path === '/forms/form-1') return Promise.resolve(form);
   if (path.startsWith('/forms/form-1/responses?')) return Promise.resolve(list);
   if (path === '/forms/form-1/responses/resp-1') return Promise.resolve(detail);
+  if (path === '/forms/form-1/responses/resp-1/flowmax') {
+    return Promise.resolve({ integrationEnabled: false, mappingEnabled: false, sync: null });
+  }
   return Promise.reject(new Error(`unexpected ${path}`));
 }
 
@@ -246,7 +249,7 @@ it('التفاصيل: كل نوع إجابة كنص آمن، دون أداة ت�
   expect(screen.getByText('2.0 كيلوبايت')).toBeTruthy();
   expect(screen.getByText('غير مفحوص ضد البرمجيات الخبيثة')).toBeTruthy();
   expect(screen.queryByRole('link', { name: /تنزيل/ })).toBeNull();
-  expect(screen.getByText(/يحتاج صلاحية «تنزيل ملفات الردود»/)).toBeTruthy();
+  expect(screen.getByText(/صلاحية «تنزيل ملفات الردود»/)).toBeTruthy();
   expect(screen.getByText('-12.5')).toBeTruthy();
   expect(screen.getByText('(مختار)', { exact: false })).toBeTruthy();
   expect(screen.getByText('لم تتغير الحالة منذ الإرسال.')).toBeTruthy();
@@ -260,6 +263,10 @@ it('التفاصيل: المراجع يغيّر الحالة ويظهر السج
   const select = (await screen.findByLabelText('الحالة الجديدة')) as HTMLSelectElement;
   const save = screen.getByRole('button', { name: 'حفظ الحالة' }) as HTMLButtonElement;
   expect(save.disabled).toBe(true);
+  // لوحة Flowmax تطلب حالتها عند التحميل؛ ننتظرها حتى لا تستهلك الرد المجهز لتغيير الحالة
+  await waitFor(() =>
+    expect(apiMock).toHaveBeenCalledWith('/forms/form-1/responses/resp-1/flowmax'),
+  );
   apiMock.mockResolvedValueOnce({
     changed: true,
     response: {

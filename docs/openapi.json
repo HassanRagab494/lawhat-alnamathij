@@ -1389,7 +1389,7 @@
     },
     "/api/forms/{id}/responses/{responseId}/files/{fileId}": {
       "get": {
-        "description": "يتطلب RESPONSES_FILES_DOWNLOAD. الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). يُعاد دائمًا كمرفق (attachment) بنوع application/octet-stream، دون عرض داخل المتصفح ودون تخزين مؤقت.",
+        "description": "يتطلب RESPONSES_FILES_DOWNLOAD للتنزيل والمعاينة معًا (وإلا 403). الملف يجب أن يخص الرد والنموذج في المسار (وإلا 404). disposition=attachment (الافتراضي): تنزيل. disposition=inline: معاينة الصور (JPG/PNG/WEBP) والفيديو (MP4/MOV/WebM) فقط مع دعم Range للفيديو؛ غيرها 400 PREVIEW_NOT_SUPPORTED. Content-Type الحقيقي، nosniff، CSP مقيدة، دون تخزين مؤقت.",
         "operationId": "ResponsesController_download",
         "parameters": [
           {
@@ -1415,6 +1415,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "disposition",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "attachment",
+                "inline"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1433,7 +1445,7 @@
             "session": []
           }
         ],
-        "summary": "تنزيل ملف مرفق برد",
+        "summary": "تنزيل ملف مرفق برد أو معاينته",
         "tags": [
           "responses"
         ]
@@ -1537,7 +1549,7 @@
     },
     "/api/public/forms/{publicId}/files": {
       "post": {
-        "description": "جسم الطلب هو محتوى الملف نفسه (application/octet-stream) بالتدفق. يُتحقق من الحجم والنوع الفعلي (لا الامتداد وحده) ويُفحص بـ ClamAV قبل القبول. الأخطاء: 413 FILE_TOO_LARGE أو SESSION_UPLOAD_LIMIT، 400 FILE_REJECTED، 422 FILE_INFECTED، 503 SCAN_UNAVAILABLE، 409 FILE_COUNT_LIMIT، 507 STORAGE_FULL.",
+        "description": "جسم الطلب هو محتوى الملف نفسه (application/octet-stream) بالتدفق. يُتحقق من الحجم والنوع الفعلي (لا الامتداد وحده) ويُفحص ضد البرمجيات الخبيثة قبل القبول عند تفعيل الفحص (UPLOAD_SCAN_MODE=required). الفيديو MP4/MOV/WebM حتى 100MB بعد التحقق من بنيته. الأخطاء: 413 FILE_TOO_LARGE أو SESSION_UPLOAD_LIMIT، 400 FILE_REJECTED، 422 FILE_INFECTED، 503 SCAN_UNAVAILABLE، 409 FILE_COUNT_LIMIT، 507 STORAGE_FULL.",
         "operationId": "FilesController_upload",
         "parameters": [
           {
@@ -1627,6 +1639,199 @@
         "summary": "إزالة ملف قبل الإرسال (من الجلسة نفسها فقط)",
         "tags": [
           "public"
+        ]
+      }
+    },
+    "/api/forms/{id}/flowmax-mapping": {
+      "get": {
+        "operationId": "FlowmaxController_getMapping",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "إعداد ربط النموذج مع حقول Flowmax",
+        "tags": [
+          "flowmax"
+        ]
+      },
+      "put": {
+        "description": "enabled وconfig.fields: لكل حقل Flowmax إما questionId (المعرّف المنطقي لسؤال في آخر إصدار منشور) أو constant، مع values اختياري لتحويل قيم الاختيار.",
+        "operationId": "FlowmaxController_saveMapping",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "حفظ ربط النموذج مع Flowmax",
+        "tags": [
+          "flowmax"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/flowmax": {
+      "get": {
+        "operationId": "FlowmaxController_state",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "integrationEnabled وmappingEnabled وsync"
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "حالة إرسال الرد إلى Flowmax ورابط العقار",
+        "tags": [
+          "flowmax"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/flowmax/approve": {
+      "post": {
+        "description": "يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE برسائل عربية)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.",
+        "operationId": "FlowmaxController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "اعتماد الرد وإرساله إلى Flowmax",
+        "tags": [
+          "flowmax"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/flowmax/retry": {
+      "post": {
+        "operationId": "FlowmaxController_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "إعادة محاولة الإرسال بعد الفشل",
+        "tags": [
+          "flowmax"
         ]
       }
     },
@@ -2284,7 +2489,7 @@
           "settings": {
             "type": "object",
             "additionalProperties": true,
-            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt), maxFileSizeMb (مطلوب، 1-25), maxFiles (مطلوب، 1-10) } — إعداد ومعاينة فقط، لا رفع فعلي"
+            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt, mp4, mov, webm), maxFileSizeMb (مطلوب، 1-25، وحتى 100 إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-10) }"
           },
           "options": {
             "description": "لأنواع الاختيار فقط؛ فارغة لغيرها",
@@ -2427,7 +2632,7 @@
           "settings": {
             "type": "object",
             "additionalProperties": true,
-            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt), maxFileSizeMb (مطلوب، 1-25), maxFiles (مطلوب، 1-10) } — إعداد ومعاينة فقط، لا رفع فعلي"
+            "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt, mp4, mov, webm), maxFileSizeMb (مطلوب، 1-25، وحتى 100 إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-10) }"
           },
           "options": {
             "maxItems": 50,
@@ -2637,6 +2842,10 @@
             "items": {
               "$ref": "#/components/schemas/PublicQuestionDto"
             }
+          },
+          "fileScanning": {
+            "type": "boolean",
+            "description": "هل تُفحص الملفات المرفوعة ضد البرمجيات الخبيثة (false في UPLOAD_SCAN_MODE=disabled)"
           }
         },
         "required": [
@@ -2645,7 +2854,8 @@
           "description",
           "acceptingResponses",
           "versionId",
-          "questions"
+          "questions",
+          "fileScanning"
         ]
       },
       "SubmitAnswerDto": {
@@ -2836,15 +3046,28 @@
               "WEBP",
               "DOCX",
               "XLSX",
-              "TXT"
+              "TXT",
+              "MP4",
+              "MOV",
+              "WEBM"
             ]
+          },
+          "malwareScanned": {
+            "type": "boolean",
+            "description": "false إن قُبل الملف دون فحص برمجيات خبيثة (UPLOAD_SCAN_MODE=disabled)"
+          },
+          "previewable": {
+            "type": "boolean",
+            "description": "صورة أو فيديو يُعرض داخل الصفحة (disposition=inline)؛ غيرها تنزيل فقط"
           }
         },
         "required": [
           "id",
           "name",
           "size",
-          "kind"
+          "kind",
+          "malwareScanned",
+          "previewable"
         ]
       },
       "AnswerViewDto": {
@@ -3087,7 +3310,10 @@
               "WEBP",
               "DOCX",
               "XLSX",
-              "TXT"
+              "TXT",
+              "MP4",
+              "MOV",
+              "WEBM"
             ]
           }
         },

@@ -47,13 +47,15 @@
    - لا دومين لـ `api` و`mysql` و`backup`.
 3. **المتغيرات** حسب [`env.example`](env.example):
 
-   | المتغير                                       | ملاحظة                                                                                                 |
-   | --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-   | `MYSQL_PASSWORD`                              | سر                                                                                                     |
-   | `MYSQL_ROOT_PASSWORD`                         | سر                                                                                                     |
-   | `WEB_ORIGIN`                                  |                                                                                                        |
-   | `UPLOAD_SCAN_MODE`                            | `disabled`                                                                                             |
-   | `BACKUP_DB_PASSWORD` و`BACKUP_ENCRYPTION_KEY` | سران لتفعيل النسخ الاحتياطي. بدونهما يعمل التطبيق، وخدمة `backup` تسجل «not configured» ولا تنسخ شيئًا |
+   | المتغير                                                              | ملاحظة                                                                                                   |
+   | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+   | `MYSQL_PASSWORD`                                                     | سر                                                                                                       |
+   | `MYSQL_ROOT_PASSWORD`                                                | سر                                                                                                       |
+   | `WEB_ORIGIN`                                                         |                                                                                                          |
+   | `UPLOAD_SCAN_MODE`                                                   | `disabled`                                                                                               |
+   | `BACKUP_DB_PASSWORD` و`BACKUP_ENCRYPTION_KEY`                        | سران لتفعيل النسخ الاحتياطي. بدونهما يعمل التطبيق، وخدمة `backup` تسجل «not configured» ولا تنسخ شيئًا   |
+   | `FLOWMAX_ENABLED` و`FLOWMAX_API_BASE_URL` و`FLOWMAX_PUBLIC_SITE_URL` | ربط Flowmax ([docs/flowmax-integration.md](../../docs/flowmax-integration.md)). دونها يبقى الربط معطّلًا |
+   | `FLOWMAX_SERVICE_TOKEN`                                              | سر: رمز حساب تكامل مخصص في Flowmax، لا حساب المدير                                                       |
 
 4. لا «Expose ports» ولا منافذ منشورة على المضيف.
 
@@ -61,8 +63,8 @@
 
 1. **نسخة احتياطية للقاعدة الحالية** حسب [deploy/backup/README.md](../backup/README.md#النسخة-قبل-تحديث-الاستضافة-إلزامي-قبل-نشر-المرحلة-النهائية).
 2. **ضبط `UPLOAD_SCAN_MODE=disabled`**، ثم **Redeploy** للمورد فقط. لا Docker Cleanup، ولا حذف volumes، ولا إعادة تشغيل للخادم أو الوكيل.
-3. **سجل الـ API:** يجب أن يظهر `20261025000000_file_uploads` ثم `All migrations have been successfully applied`.
-4. **التحقق من الواجهة:** الدخول، ونشر نموذج فيه سؤال ملفات، ورفع PDF وPNG من الرابط العام، والإرسال، والتنزيل بحساب يملك الصلاحية، ورفض امتداد غير مسموح.
+3. **سجل الـ API:** يجب أن تظهر آخر migration (`20261101000000_video_flowmax`: قيم الفيديو وجدولا Flowmax، إضافة فقط) ثم `All migrations have been successfully applied`.
+4. **التحقق من الواجهة:** الدخول، ونشر نموذج فيه سؤال ملفات، ورفع PDF وPNG وفيديو MP4 من الرابط العام، والإرسال، ومعاينة الصورة والفيديو والتنزيل بحساب يملك الصلاحية، ورفض امتداد غير مسموح.
 5. **من جهاز خارج الخادم:**
    ```bash
    node scripts/check-forwarded-for.mjs --base https://forms.flowmaxsa.cloud
