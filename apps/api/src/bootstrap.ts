@@ -43,7 +43,7 @@ export function buildOpenApi(app: INestApplication, env: AppEnv): OpenAPIObject 
     .setTitle(`${env.APP_NAME} — API`)
     .setDescription(
       [
-        'واجهة برمجة المرحلة الأولى. الأخطاء بشكل موحد: { statusCode, code, message, fields?, details? }.',
+        'واجهة برمجة لوحة النماذج. الأخطاء بشكل موحد: { statusCode, code, message, fields?, details? }.',
         `المصادقة بجلسة في Cookie HttpOnly باسم ${SESSION_COOKIE}.`,
         `كل طلب معدِّل (POST/PATCH) يتطلب ترويسة ${CSRF_HEADER} بقيمة Cookie lp_csrf.`,
       ].join('\n\n'),

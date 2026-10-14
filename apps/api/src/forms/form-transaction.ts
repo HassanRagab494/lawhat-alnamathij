@@ -24,7 +24,9 @@ export async function runFormTransaction<T>(
     } catch (error) {
       const retryable =
         error instanceof Prisma.PrismaClientKnownRequestError &&
+        // P2028: تعذر بدء المعاملة أو انتهت مهلتها (لم يُثبَّت شيء)، فإعادة المحاولة آمنة.
         (error.code === 'P2034' ||
+          error.code === 'P2028' ||
           (error.code === 'P2010' && ['1205', '1213'].includes(String(error.meta?.code))));
       if (!retryable) throw error;
       if (attempt >= 2)

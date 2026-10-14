@@ -26,6 +26,7 @@ type Status = 'active' | 'archived';
 
 function FormsList() {
   const { me } = useAuth();
+  const canResponses = can(me, 'RESPONSES_VIEW');
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -164,6 +165,11 @@ function FormsList() {
                     <th scope="col" className="px-3 py-3 text-start font-semibold">
                       آخر تعديل
                     </th>
+                    {canResponses && (
+                      <th scope="col" className="px-3 py-3 text-start font-semibold">
+                        <span className="sr-only">الردود</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -181,14 +187,23 @@ function FormsList() {
                         </Link>
                       </td>
                       <td className="px-3 py-3">
-                        {form.isArchived ? (
-                          <Badge tone="muted">مؤرشف</Badge>
-                        ) : (
-                          <Badge tone="velvet">مسودة</Badge>
-                        )}
+                        <FormStatusBadges form={form} />
                       </td>
                       <td className="px-3 py-3 text-muted">{form.createdBy.displayName}</td>
                       <td className="px-3 py-3 text-muted">{formatDateTime(form.updatedAt)}</td>
+                      {canResponses && (
+                        <td className="px-3 py-3 text-end">
+                          {form.publication.latestVersion && (
+                            <Link
+                              href={`/forms/${form.id}/responses`}
+                              className="font-semibold text-velvet-700 hover:underline"
+                              aria-label={`ردود «${form.title}»`}
+                            >
+                              الردود
+                            </Link>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -198,23 +213,30 @@ function FormsList() {
             {/* بطاقات للشاشات الصغيرة */}
             <ul className="flex flex-col gap-3 md:hidden">
               {data.items.map((form) => (
-                <li key={form.id}>
-                  <Link
-                    href={`/forms/${form.id}`}
-                    className="flex flex-col gap-2 rounded-xl border border-smoke-200 bg-white/70 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="font-semibold text-velvet-800">{form.title}</span>
-                      {form.isArchived ? (
-                        <Badge tone="muted">مؤرشف</Badge>
-                      ) : (
-                        <Badge tone="velvet">مسودة</Badge>
-                      )}
-                    </div>
-                    <span className="text-xs text-muted">
-                      {form.createdBy.displayName} · آخر تعديل {formatDateTime(form.updatedAt)}
+                <li
+                  key={form.id}
+                  className="flex flex-col gap-2 rounded-xl border border-smoke-200 bg-white/70 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <Link href={`/forms/${form.id}`} className="font-semibold text-velvet-800">
+                      {form.title}
+                    </Link>
+                    <span className="flex shrink-0 gap-1">
+                      <FormStatusBadges form={form} />
                     </span>
-                  </Link>
+                  </div>
+                  <span className="text-xs text-muted">
+                    {form.createdBy.displayName} · آخر تعديل {formatDateTime(form.updatedAt)}
+                  </span>
+                  {canResponses && form.publication.latestVersion && (
+                    <Link
+                      href={`/forms/${form.id}/responses`}
+                      className="self-start text-sm font-semibold text-velvet-700 underline"
+                      aria-label={`ردود «${form.title}»`}
+                    >
+                      الردود
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
@@ -239,5 +261,19 @@ export default function FormsPage() {
         <FormsList />
       </Suspense>
     </RequirePermission>
+  );
+}
+
+function FormStatusBadges({ form }: { form: FormItem }) {
+  return (
+    <>
+      {form.isArchived ? (
+        <Badge tone="muted">مؤرشف</Badge>
+      ) : form.publication.latestVersion ? (
+        <Badge tone="success">منشور</Badge>
+      ) : (
+        <Badge tone="velvet">مسودة</Badge>
+      )}
+    </>
   );
 }

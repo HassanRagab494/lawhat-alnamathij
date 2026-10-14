@@ -12,3 +12,6 @@ process.env.LOGIN_MAX_FAILURES = '3';
 process.env.PUBLIC_SUBMIT_PER_IP_PER_MINUTE = '100000';
 process.env.PUBLIC_SUBMIT_PER_FORM_PER_MINUTE = '100000';
 process.env.TRUST_PROXY = 'loopback';
+// حدود مسارات إدارة الردود مرتفعة لبقية الاختبارات؛ اختبار المعدل في phase4 يشغّل تطبيقًا مستقلًا بحدود منخفضة.
+process.env.RESPONSES_RATE_LIMIT_PER_MINUTE = '100000';
+process.env.RESPONSES_EXPORT_PER_MINUTE = '100000';

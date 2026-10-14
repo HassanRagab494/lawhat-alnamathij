@@ -1,4 +1,4 @@
-# البنية والقرارات — المراحل الأولى إلى الثالثة
+# البنية والقرارات — المراحل الأولى إلى الرابعة
 
 ## هيكل المستودع
 
@@ -95,6 +95,37 @@ lawhat-alnamathij/
 - النموذج المؤرشف لا يُعدَّل حتى يُستعاد. لا يوجد حذف نهائي.
 - العنوان غير فريد. البحث بالعنوان (`LIKE` غير حساس لحالة الأحرف بترتيب `utf8mb4_unicode_ci`).
 
+### الردود ومراجعتها (المرحلة الرابعة)
+
+**سلامة الربط في قاعدة البيانات بمفاتيح مركبة**، لا في الكود فقط:
+
+| الجدول                | المفتاح المركب              | المرجع                                   |
+| --------------------- | --------------------------- | ---------------------------------------- |
+| `form_responses`      | `(version_id, form_id)`     | `form_versions(id, form_id)`             |
+| `form_answers`        | `(response_id, version_id)` | `form_responses(id, version_id)`         |
+| `form_answers`        | `(question_id, version_id)` | `form_version_questions(id, version_id)` |
+| `form_answer_options` | `(answer_id, question_id)`  | `form_answers(id, question_id)`          |
+| `form_answer_options` | `(option_id, question_id)`  | `form_version_options(id, question_id)`  |
+
+النتيجة:
+
+- لا يمكن ربط إجابة بسؤال من إصدار آخر، ولا خيار من سؤال آخر، ولا رد بإصدار من نموذج آخر.
+- migration `20261020000000_response_review` تضيف عمودي الربط وتملؤهما من البيانات الحالية قبل جعلهما إلزاميين، فتُطبق بـ `migrate deploy` على قاعدة فيها ردود.
+
+**الحالات وسجلها:**
+
+- **الحالات:** `NEW` و`IN_REVIEW` و`ACCEPTED` و`REJECTED`.
+- **التغيير:** معاملة بقفل صف الرد (مع إعادة المحاولة عند تعارض الأقفال). الحالة نفسها لا تُنشئ سجلًا.
+- **السجل** `form_response_status_changes` لا يُعدَّل ولا يُحذف (`RESTRICT`).
+
+**الأداء:**
+
+- فهارس `(form_id, submitted_at)` و`(form_id, status, submitted_at)` و`(form_id, version_id, submitted_at)`، والرقم المرجعي فريد.
+- القائمة لا تحمل الإجابات.
+- التصدير على دفعات بمؤشر، بحد للصفوف والحجم.
+
+**الحذف:** الردود لا تُحذف عند تعديل المسودة أو نشر إصدار جديد. الإصدارات والأسئلة والخيارات مرتبطة بـ `RESTRICT`.
+
 ### المعرّفات والأوقات
 
 - كل المعرّفات UUIDv7 (`CHAR(36)`): غير متسلسلة للمستخدم الخارجي ومرتبة زمنيًا لصالح الفهارس.
@@ -108,23 +139,24 @@ lawhat-alnamathij/
 
 ## تصميم الجداول
 
-| الجدول                   | الأعمدة الرئيسية                                                                                                                                                                                                                  | ملاحظات                            |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `users`                  | `id`، `username` (فريد، صغير)، `display_name`، `password_hash`، `role` (ADMIN/SUPERVISOR)، `is_active`، `failed_login_count`، `locked_until`، `last_login_at`، `password_changed_at`، `created_by_id`، `created_at`، `updated_at` |                                    |
-| `user_permissions`       | (`user_id`، `permission`) مفتاح مركب، `granted_by_id`، `granted_at`                                                                                                                                                               | enum قابل للتوسعة بـ migration     |
-| `sessions`               | `id`، `token_hash` (فريد)، `csrf_token_hash`، `user_id`، `created_at`، `last_seen_at`، `expires_at`، `revoked_at`، `revoked_reason`، `ip_address`، `user_agent`                                                                   | لا يُخزن الرمز نفسه                |
-| `forms`                  | `id`، `public_id` (فريد، عشوائي 128 بت)، `accepting_responses`، `created_by_id`، `created_at`، `updated_at`، `archived_at`، `archived_by_id`                                                                                      | فهرس (`archived_at`، `updated_at`) |
-| `form_drafts`            | `id`، `form_id` (فريد)، `title`، `description`، `revision`، `updated_by_id`، `created_at`، `updated_at`                                                                                                                           | فهرس على `title`                   |
-| `form_versions`          | `id`، `form_id`، `version_number` (فريد مع النموذج)، `title`، `description`، `source_draft_revision`، `publish_key` (فريد مع النموذج)، `published_by_id`، `published_at`                                                          | لا تحديث ولا حذف                   |
-| `form_version_questions` | `id`، `version_id`، `logical_id` (معرّف سؤال المسودة)، `position`، `type`، `title`، `description`، `required`، `settings` (JSON)                                                                                                  |                                    |
-| `form_version_options`   | `id`، `question_id`، `logical_id`، `position`، `label`                                                                                                                                                                            |                                    |
-| `form_responses`         | `id`، `form_id`، `version_id`، `reference_code` (فريد)، `status` (NEW)، `idempotency_key` و`request_hash` (فريد مع النموذج)، `submitted_at`                                                                                       | بلا IP ولا User-Agent              |
-| `form_answers`           | `id`، `response_id`، `question_id` (فريد مع الرد)، `text_value`، `number_value` DECIMAL(23,10)، `date_value` DATE                                                                                                                 | تُحذف مع الرد فقط                  |
-| `form_answer_options`    | (`answer_id`، `option_id`) مفتاح مركب                                                                                                                                                                                             |                                    |
-| `audit_logs`             | `id`، `actor_id`، `action`، `entity_type`، `entity_id`، `details` (JSON)، `ip_address`، `created_at`                                                                                                                              | بلا أسرار                          |
+| الجدول                         | الأعمدة الرئيسية                                                                                                                                                                                                                  | ملاحظات                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `users`                        | `id`، `username` (فريد، صغير)، `display_name`، `password_hash`، `role` (ADMIN/SUPERVISOR)، `is_active`، `failed_login_count`، `locked_until`، `last_login_at`، `password_changed_at`، `created_by_id`، `created_at`، `updated_at` |                                                 |
+| `user_permissions`             | (`user_id`، `permission`) مفتاح مركب، `granted_by_id`، `granted_at`                                                                                                                                                               | enum قابل للتوسعة بـ migration                  |
+| `sessions`                     | `id`، `token_hash` (فريد)، `csrf_token_hash`، `user_id`، `created_at`، `last_seen_at`، `expires_at`، `revoked_at`، `revoked_reason`، `ip_address`، `user_agent`                                                                   | لا يُخزن الرمز نفسه                             |
+| `forms`                        | `id`، `public_id` (فريد، عشوائي 128 بت)، `accepting_responses`، `created_by_id`، `created_at`، `updated_at`، `archived_at`، `archived_by_id`                                                                                      | فهرس (`archived_at`، `updated_at`)              |
+| `form_drafts`                  | `id`، `form_id` (فريد)، `title`، `description`، `revision`، `updated_by_id`، `created_at`، `updated_at`                                                                                                                           | فهرس على `title`                                |
+| `form_versions`                | `id`، `form_id`، `version_number` (فريد مع النموذج)، `title`، `description`، `source_draft_revision`، `publish_key` (فريد مع النموذج)، `published_by_id`، `published_at`                                                          | لا تحديث ولا حذف                                |
+| `form_version_questions`       | `id`، `version_id`، `logical_id` (معرّف سؤال المسودة)، `position`، `type`، `title`، `description`، `required`، `settings` (JSON)                                                                                                  |                                                 |
+| `form_version_options`         | `id`، `question_id`، `logical_id`، `position`، `label`                                                                                                                                                                            |                                                 |
+| `form_responses`               | `id`، `form_id`، `version_id`، `reference_code` (فريد)، `status` (NEW، IN_REVIEW، ACCEPTED، REJECTED)، `idempotency_key` و`request_hash` (فريد مع النموذج)، `submitted_at`                                                        | بلا IP ولا User-Agent                           |
+| `form_answers`                 | `id`، `response_id`، `version_id`، `question_id` (فريد مع الرد)، `text_value`، `number_value` DECIMAL(23,10)، `date_value` DATE                                                                                                   | مفاتيح مركبة مع الرد والسؤال؛ تُحذف مع الرد فقط |
+| `form_answer_options`          | (`answer_id`، `option_id`) مفتاح أساسي، `question_id`                                                                                                                                                                             | مفاتيح مركبة مع الإجابة والخيار                 |
+| `form_response_status_changes` | `id`، `response_id`، `from_status`، `to_status`، `changed_by_id`، `changed_at`                                                                                                                                                    | لا تعديل ولا حذف                                |
+| `audit_logs`                   | `id`، `actor_id`، `action`، `entity_type`، `entity_id`، `details` (JSON)، `ip_address`، `created_at`                                                                                                                              | بلا أسرار                                       |
 
 الإجراءات المسجلة: `user.bootstrap_admin`، `user.created`، `user.updated`، `user.permissions_changed`، `user.activated`،
 `user.deactivated`، `user.password_reset`، `auth.login`، `auth.login_failed`، `auth.login_locked`، `auth.logout`،
-`auth.password_changed`، `form.created`، `form.updated` (مع القيم قبل/بعد)، `form.archived`، `form.restored`، `form.draft_saved`، `form.published`، `form.responses_opened`، `form.responses_closed`.
+`auth.password_changed`، `form.created`، `form.updated` (مع القيم قبل/بعد)، `form.archived`، `form.restored`، `form.draft_saved`، `form.published`، `form.responses_opened`، `form.responses_closed`، `response.status_changed`، `responses.exported`.
 لا يُسجَّل إرسال الردود ولا محتواها.
 تُكتب داخل نفس المعاملة مع التغيير الذي تسجله.

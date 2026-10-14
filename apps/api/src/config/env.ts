@@ -38,6 +38,10 @@ const envSchema = z.object({
   PUBLIC_SUBMIT_PER_IP_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(10),
   /** حد إرسال الردود العامة لكل نموذج في الدقيقة (من كل العناوين معًا). */
   PUBLIC_SUBMIT_PER_FORM_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(120),
+  /** حد طلبات إدارة الردود (القائمة والتفاصيل وتغيير الحالة) لكل مستخدم في الدقيقة. */
+  RESPONSES_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(120),
+  /** حد تصدير الردود CSV لكل مستخدم في الدقيقة. */
+  RESPONSES_EXPORT_PER_MINUTE: z.coerce.number().int().min(1).max(1_000_000).default(5),
   /**
    * قيمة Express «trust proxy»: من يُوثق بترويسة X-Forwarded-For منه لتحديد IP العميل.
    * محليًا: loopback (Next.js على الجهاز نفسه). في الإنتاج: عنوان Next.js أو شبكته الداخلية فقط،

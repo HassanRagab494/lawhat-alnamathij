@@ -55,7 +55,7 @@ describe('validation pipe', () => {
       username: 'س',
       displayName: 'سارة',
       password: 'a-long-enough-pass',
-      permissions: ['FORMS_VIEW', 'RESPONSES_EXPORT'],
+      permissions: ['FORMS_VIEW', 'RESPONSES_DELETE'],
     })) as ApiErrorBody;
     const fields = Object.fromEntries((result.fields ?? []).map((f) => [f.field, f.message]));
     expect(fields.username).toMatch(/اسم المستخدم/);

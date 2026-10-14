@@ -6,7 +6,7 @@ import type { FormDraft } from '@/lib/draft';
 import { formatDateTime } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import type { FormItem, Me } from '@/lib/types';
-import { Alert, Badge, Button, Card, ConfirmDialog } from './ui';
+import { Alert, Badge, Button, Card, ConfirmDialog, LinkButton } from './ui';
 
 interface PublishResult {
   form: FormItem;
@@ -35,7 +35,7 @@ export function publicFormUrl(publicId: string): string {
 
 /**
  * حالة النشر والاستقبال للنموذج: النشر يأخذ المسودة المحفوظة فقط، والاستقبال منفصل عنه.
- * لا روابط لإدارة الردود أو التصدير لأنها غير منفذة بعد.
+ * رابط الردود يظهر لمن يملك عرض الردود بعد أول نشر.
  */
 export function PublishPanel({
   form,
@@ -220,6 +220,16 @@ export function PublishPanel({
             </ul>
           )}
         </div>
+      )}
+
+      {latest && can(me, 'RESPONSES_VIEW') && (
+        <LinkButton
+          href={`/forms/${form.id}/responses`}
+          variant="secondary"
+          className="mt-3 w-full"
+        >
+          عرض الردود
+        </LinkButton>
       )}
 
       {canIntake && latest && (

@@ -19,22 +19,44 @@ export const PERMISSION_OPTIONS: { key: Permission; label: string; hint: string 
     label: 'فتح وإغلاق استقبال الردود',
     hint: 'التحكم في قبول الردود على الرابط العام.',
   },
+  {
+    key: 'RESPONSES_VIEW',
+    label: 'عرض الردود',
+    hint: 'الاطلاع على قائمة ردود النماذج وتفاصيلها.',
+  },
+  {
+    key: 'RESPONSES_REVIEW',
+    label: 'مراجعة الردود وتغيير حالتها',
+    hint: 'تغيير حالة الرد: جديد، قيد المراجعة، مقبول، مرفوض.',
+  },
+  {
+    key: 'RESPONSES_EXPORT',
+    label: 'تصدير الردود',
+    hint: 'تنزيل الردود ملف CSV.',
+  },
 ];
 
 export const PERMISSION_LABELS = Object.fromEntries(
   PERMISSION_OPTIONS.map((p) => [p.key, p.label]),
 ) as Record<Permission, string>;
 
-/** الصلاحيات التي تتطلب صلاحية العرض (مطابقة لقواعد الـ Backend). */
-const REQUIRES_VIEW: Permission[] = [
-  'FORMS_CREATE',
-  'FORMS_EDIT',
-  'FORMS_ARCHIVE',
-  'FORMS_PUBLISH',
-  'FORMS_INTAKE',
-];
+/** الصلاحية التي تتطلبها كل صلاحية (مطابقة لـ PERMISSION_REQUIRES في الـ Backend). */
+const REQUIRES: Partial<Record<Permission, Permission>> = {
+  FORMS_CREATE: 'FORMS_VIEW',
+  FORMS_EDIT: 'FORMS_VIEW',
+  FORMS_ARCHIVE: 'FORMS_VIEW',
+  FORMS_PUBLISH: 'FORMS_VIEW',
+  FORMS_INTAKE: 'FORMS_VIEW',
+  RESPONSES_VIEW: 'FORMS_VIEW',
+  RESPONSES_REVIEW: 'RESPONSES_VIEW',
+  RESPONSES_EXPORT: 'RESPONSES_VIEW',
+};
 
-/** يبدّل صلاحية مع الحفاظ على الاعتماديات: تفعيل صلاحية تابعة يفعّل العرض، وإلغاء العرض يلغي التوابع. */
+/**
+ * يبدّل صلاحية مع الحفاظ على الاعتماديات المتسلسلة:
+ * تفعيل صلاحية يفعّل ما تتطلبه (مثلًا المراجعة ⇒ عرض الردود ⇒ عرض النماذج)،
+ * وإلغاء صلاحية يلغي كل ما يعتمد عليها.
+ */
 export function togglePermission(
   current: Permission[],
   key: Permission,
@@ -42,11 +64,20 @@ export function togglePermission(
 ): Permission[] {
   const set = new Set(current);
   if (checked) {
-    set.add(key);
-    if (REQUIRES_VIEW.includes(key)) set.add('FORMS_VIEW');
+    for (let p: Permission | undefined = key; p; p = REQUIRES[p]) set.add(p);
   } else {
     set.delete(key);
-    if (key === 'FORMS_VIEW') REQUIRES_VIEW.forEach((p) => set.delete(p));
+    let removed = true;
+    while (removed) {
+      removed = false;
+      for (const p of set) {
+        const required = REQUIRES[p];
+        if (required && !set.has(required)) {
+          set.delete(p);
+          removed = true;
+        }
+      }
+    }
   }
   return PERMISSION_OPTIONS.map((p) => p.key).filter((p) => set.has(p));
 }

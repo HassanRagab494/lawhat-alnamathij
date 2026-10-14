@@ -1,7 +1,15 @@
 // أنواع مطابقة لاستجابات الـ API (انظر docs/openapi.json).
 
 export type Permission =
-  'FORMS_VIEW' | 'FORMS_CREATE' | 'FORMS_EDIT' | 'FORMS_ARCHIVE' | 'FORMS_PUBLISH' | 'FORMS_INTAKE';
+  | 'FORMS_VIEW'
+  | 'FORMS_CREATE'
+  | 'FORMS_EDIT'
+  | 'FORMS_ARCHIVE'
+  | 'FORMS_PUBLISH'
+  | 'FORMS_INTAKE'
+  | 'RESPONSES_VIEW'
+  | 'RESPONSES_REVIEW'
+  | 'RESPONSES_EXPORT';
 export type UserRole = 'ADMIN' | 'SUPERVISOR';
 
 export interface Me {

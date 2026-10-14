@@ -1,4 +1,4 @@
-// مخطط المرحلة الأولى فقط: المستخدمون، الصلاحيات، الجلسات، النماذج، مسودات الإصدارات، سجل العمليات.
+// المستخدمون والصلاحيات والجلسات، النماذج ومسوداتها وإصداراتها المنشورة، الردود وسجل حالاتها، وسجل العمليات.
 // جميع الأوقات تُخزَّن بتوقيت UTC (DATETIME(3)).
 // المعرّفات UUIDv7: غير متسلسلة الدلالة للمستخدم الخارجي ومرتبة زمنيًا لصالح الفهارس.
 
@@ -17,7 +17,7 @@ enum UserRole {
   SUPERVISOR
 }
 
-/// صلاحيات المشرفين. تُضاف صلاحيات مراجعة الردود والتصدير لاحقًا بـ migration تضيف قيمًا جديدة.
+/// صلاحيات المشرفين. أي صلاحية جديدة تُضاف بـ migration تضيف قيمًا للـ enum.
 enum Permission {
   FORMS_VIEW
   FORMS_CREATE
@@ -27,6 +27,12 @@ enum Permission {
   FORMS_PUBLISH
   /// فتح استقبال الردود وإغلاقه
   FORMS_INTAKE
+  /// عرض قائمة الردود وتفاصيلها (المرحلة الرابعة)
+  RESPONSES_VIEW
+  /// تغيير حالة الرد
+  RESPONSES_REVIEW
+  /// تصدير الردود CSV
+  RESPONSES_EXPORT
 }
 
 model User {
@@ -48,18 +54,19 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
 
-  createdBy          User?            @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers       User[]           @relation("UserCreatedBy")
-  deletedBy          User?            @relation("UserDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  deletedUsers       User[]           @relation("UserDeletedBy")
-  permissions        UserPermission[] @relation("PermissionHolder")
-  grantedPermissions UserPermission[] @relation("PermissionGrantor")
-  sessions           Session[]
-  createdForms       Form[]           @relation("FormCreatedBy")
-  publishedVersions  FormVersion[]    @relation("VersionPublishedBy")
-  archivedForms      Form[]           @relation("FormArchivedBy")
-  draftUpdates       FormDraft[]      @relation("DraftUpdatedBy")
-  auditLogs          AuditLog[]
+  createdBy             User?                      @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers          User[]                     @relation("UserCreatedBy")
+  deletedBy             User?                      @relation("UserDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedUsers          User[]                     @relation("UserDeletedBy")
+  permissions           UserPermission[]           @relation("PermissionHolder")
+  grantedPermissions    UserPermission[]           @relation("PermissionGrantor")
+  sessions              Session[]
+  createdForms          Form[]                     @relation("FormCreatedBy")
+  publishedVersions     FormVersion[]              @relation("VersionPublishedBy")
+  responseStatusChanges FormResponseStatusChange[] @relation("ResponseStatusChangedBy")
+  archivedForms         Form[]                     @relation("FormArchivedBy")
+  draftUpdates          FormDraft[]                @relation("DraftUpdatedBy")
+  auditLogs             AuditLog[]
 
   @@index([role, isActive])
   @@index([deletedAt])
@@ -231,6 +238,7 @@ model FormVersion {
 
   @@unique([formId, versionNumber])
   @@unique([formId, publishKey])
+  @@unique([id, formId])
   @@map("form_versions")
 }
 
@@ -251,6 +259,7 @@ model FormVersionQuestion {
   answers FormAnswer[]
 
   @@unique([versionId, logicalId])
+  @@unique([id, versionId])
   @@index([versionId, position])
   @@map("form_version_questions")
 }
@@ -265,12 +274,17 @@ model FormVersionOption {
   question FormVersionQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
   selected FormAnswerOption[]
 
+  @@unique([id, questionId])
   @@index([questionId, position])
   @@map("form_version_options")
 }
 
+/// حالات مراجعة الرد. كل تغيير يُسجَّل في form_response_status_changes.
 enum ResponseStatus {
   NEW
+  IN_REVIEW
+  ACCEPTED
+  REJECTED
 }
 
 /// رد زائر على إصدار منشور. لا يُخزَّن IP أو User-Agent.
@@ -287,12 +301,17 @@ model FormResponse {
   requestHash    String         @map("request_hash") @db.Char(64)
   submittedAt    DateTime       @default(now()) @map("submitted_at") @db.DateTime(3)
 
-  form    Form         @relation(fields: [formId], references: [id], onDelete: Restrict)
-  version FormVersion  @relation(fields: [versionId], references: [id], onDelete: Restrict)
-  answers FormAnswer[]
+  form          Form                       @relation(fields: [formId], references: [id], onDelete: Restrict)
+  /// مفتاح مركب: الإصدار يجب أن يخص النموذج نفسه.
+  version       FormVersion                @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)
+  answers       FormAnswer[]
+  statusChanges FormResponseStatusChange[]
 
   @@unique([formId, idempotencyKey])
+  @@unique([id, versionId])
   @@index([formId, submittedAt])
+  @@index([formId, status, submittedAt])
+  @@index([formId, versionId, submittedAt])
   @@map("form_responses")
 }
 
@@ -300,26 +319,50 @@ model FormResponse {
 model FormAnswer {
   id          String    @id @default(uuid(7)) @db.Char(36)
   responseId  String    @map("response_id") @db.Char(36)
+  /// إصدار الرد نفسه؛ يدخل في المفتاحين المركبين فلا يُربط السؤال إلا بإصدار الرد.
+  versionId   String    @map("version_id") @db.Char(36)
   questionId  String    @map("question_id") @db.Char(36)
   textValue   String?   @map("text_value") @db.Text
   numberValue Decimal?  @map("number_value") @db.Decimal(23, 10)
   dateValue   DateTime? @map("date_value") @db.Date
 
-  response FormResponse        @relation(fields: [responseId], references: [id], onDelete: Cascade)
-  question FormVersionQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  response FormResponse        @relation(fields: [responseId, versionId], references: [id, versionId], onDelete: Cascade)
+  question FormVersionQuestion @relation(fields: [questionId, versionId], references: [id, versionId], onDelete: Restrict)
   options  FormAnswerOption[]
 
   @@unique([responseId, questionId])
+  @@unique([id, questionId])
+  @@index([questionId, versionId])
   @@map("form_answers")
 }
 
 model FormAnswerOption {
-  answerId String @map("answer_id") @db.Char(36)
-  optionId String @map("option_id") @db.Char(36)
+  answerId   String @map("answer_id") @db.Char(36)
+  /// سؤال الإجابة نفسه؛ يدخل في المفتاحين المركبين فلا يُربط إلا خيار من سؤال الإجابة.
+  questionId String @map("question_id") @db.Char(36)
+  optionId   String @map("option_id") @db.Char(36)
 
-  answer FormAnswer        @relation(fields: [answerId], references: [id], onDelete: Cascade)
-  option FormVersionOption @relation(fields: [optionId], references: [id], onDelete: Restrict)
+  answer FormAnswer        @relation(fields: [answerId, questionId], references: [id, questionId], onDelete: Cascade)
+  option FormVersionOption @relation(fields: [optionId, questionId], references: [id, questionId], onDelete: Restrict)
 
   @@id([answerId, optionId])
+  @@index([optionId, questionId])
   @@map("form_answer_options")
+}
+
+/// سجل تغييرات حالة الرد: لا يُعدَّل ولا يُحذف. تغيير الحالة إلى قيمتها الحالية لا يضيف سجلًا.
+model FormResponseStatusChange {
+  id          String         @id @default(uuid(7)) @db.Char(36)
+  responseId  String         @map("response_id") @db.Char(36)
+  fromStatus  ResponseStatus @map("from_status")
+  toStatus    ResponseStatus @map("to_status")
+  changedById String         @map("changed_by_id") @db.Char(36)
+  changedAt   DateTime       @default(now()) @map("changed_at") @db.DateTime(3)
+
+  response  FormResponse @relation(fields: [responseId], references: [id], onDelete: Restrict)
+  changedBy User         @relation("ResponseStatusChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([responseId, changedAt])
+  @@index([changedById])
+  @@map("form_response_status_changes")
 }

@@ -23,12 +23,14 @@ export type AuditAction =
   | 'form.responses_opened'
   | 'form.responses_closed'
   | 'form.archived'
-  | 'form.restored';
+  | 'form.restored'
+  | 'response.status_changed'
+  | 'responses.exported';
 
 export interface AuditEntry {
   actorId: string | null;
   action: AuditAction;
-  entityType: 'user' | 'form' | 'session';
+  entityType: 'user' | 'form' | 'session' | 'response';
   entityId?: string | null;
   /** لا تضع هنا أي كلمة مرور أو رمز أو تجزئة. */
   details?: Prisma.InputJsonValue;

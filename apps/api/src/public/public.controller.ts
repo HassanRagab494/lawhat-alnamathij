@@ -40,7 +40,7 @@ export class PublicController {
   @Post(':publicId/responses')
   @Public()
   @UseGuards(ThrottlerGuard)
-  @SkipThrottle({ login: true })
+  @SkipThrottle({ login: true, responses: true, responsesExport: true })
   @ApiOperation({
     summary: 'إرسال رد',
     description:

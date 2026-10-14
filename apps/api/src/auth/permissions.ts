@@ -1,7 +1,7 @@
 import { Permission, UserRole } from '@prisma/client';
 
 /**
- * فهرس الصلاحيات المركزي. لإضافة صلاحية مستقبلية (مثل مراجعة الردود أو التصدير):
+ * فهرس الصلاحيات المركزي. لإضافة صلاحية مستقبلية:
  * 1) أضف القيمة إلى enum Permission في schema.prisma وأنشئ migration،
  * 2) أضف وصفها هنا وفي واجهة المستخدم، 3) اربطها بالمسارات عبر @RequirePermissions.
  */
@@ -14,6 +14,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   FORMS_ARCHIVE: 'أرشفة النماذج واستعادتها',
   FORMS_PUBLISH: 'نشر النماذج',
   FORMS_INTAKE: 'فتح وإغلاق استقبال الردود',
+  RESPONSES_VIEW: 'عرض الردود',
+  RESPONSES_REVIEW: 'مراجعة الردود وتغيير حالتها',
+  RESPONSES_EXPORT: 'تصدير الردود',
 };
 
 /** صلاحيات لا معنى لها دون صلاحية أخرى (مثلًا: لا تعديل دون عرض). */
@@ -23,6 +26,10 @@ export const PERMISSION_REQUIRES: Partial<Record<Permission, Permission>> = {
   FORMS_ARCHIVE: 'FORMS_VIEW',
   FORMS_PUBLISH: 'FORMS_VIEW',
   FORMS_INTAKE: 'FORMS_VIEW',
+  // الردود تُفتح من صفحة النموذج، فعرضها يتطلب عرض النماذج؛ المراجعة والتصدير يتطلبان عرض الردود.
+  RESPONSES_VIEW: 'FORMS_VIEW',
+  RESPONSES_REVIEW: 'RESPONSES_VIEW',
+  RESPONSES_EXPORT: 'RESPONSES_VIEW',
 };
 
 /** مدير النظام يملك كل الصلاحيات دائمًا؛ المشرف يملك ما مُنح له فقط. */

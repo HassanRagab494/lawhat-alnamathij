@@ -8,6 +8,7 @@ import { APP_ENV, AppEnv } from './config/env';
 import { DashboardModule } from './dashboard/dashboard.controller';
 import { FormsModule } from './forms/forms.module';
 import { PublicModule } from './public/public.module';
+import { ResponsesModule } from './responses/responses.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
@@ -17,14 +18,22 @@ export const THROTTLE = {
   login: 'login',
   submitIp: 'submitIp',
   submitForm: 'submitForm',
+  responses: 'responses',
+  responsesExport: 'responsesExport',
 } as const;
+
+/** مسارات الإدارة تُحسب لكل مستخدم (الحارس العام يضبط req.auth قبل حارس المعدل). */
+const perUser = (req: Record<string, unknown>) => {
+  const r = req as unknown as Request;
+  return r.auth ? `user:${r.auth.userId}` : `ip:${r.ip ?? ''}`;
+};
 
 @Module({
   imports: [
     ConfigModule,
     PrismaModule,
     AuditModule,
-    // ThrottlerGuard مطبق على مسارَي الدخول وإرسال الرد فقط، وليس عامًا.
+    // ThrottlerGuard مطبق على الدخول وإرسال الرد ومسارات إدارة الردود فقط، وليس عامًا.
     // التتبع الافتراضي بـ req.ip الذي تحسبه Express وفق TRUST_PROXY، فلا يُصدَّق X-Forwarded-For من العميل مباشرة.
     ThrottlerModule.forRootAsync({
       inject: [APP_ENV],
@@ -42,12 +51,25 @@ export const THROTTLE = {
           getTracker: (req: Record<string, unknown>) =>
             `form:${String((req as unknown as Request).params?.publicId ?? '')}`,
         },
+        {
+          name: THROTTLE.responses,
+          ttl: 60_000,
+          limit: env.RESPONSES_RATE_LIMIT_PER_MINUTE,
+          getTracker: perUser,
+        },
+        {
+          name: THROTTLE.responsesExport,
+          ttl: 60_000,
+          limit: env.RESPONSES_EXPORT_PER_MINUTE,
+          getTracker: perUser,
+        },
       ],
     }),
     AuthModule,
     UsersModule,
     FormsModule,
     PublicModule,
+    ResponsesModule,
     DashboardModule,
   ],
   controllers: [HealthController],

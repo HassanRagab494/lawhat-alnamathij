@@ -26,7 +26,7 @@ export class AuthController {
   @Post('login')
   @Public()
   @UseGuards(ThrottlerGuard)
-  @SkipThrottle({ submitIp: true, submitForm: true })
+  @SkipThrottle({ submitIp: true, submitForm: true, responses: true, responsesExport: true })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'تسجيل الدخول',

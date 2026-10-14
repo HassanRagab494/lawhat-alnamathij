@@ -1102,6 +1102,355 @@
         ]
       }
     },
+    "/api/forms/{id}/responses": {
+      "get": {
+        "description": "ترقيم من قاعدة البيانات، بحث بالرقم المرجعي (كاملًا أو بدايته)، فلترة بالحالة وبالأيام من/إلى بتوقيت الرياض وبرقم الإصدار، وترتيب بتاريخ الإرسال. لا تتضمن الإجابات.",
+        "operationId": "ResponsesController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "بحث بالرقم المرجعي (كاملًا أو بدايته، مع الشرطات أو دونها)",
+            "schema": {
+              "maxLength": 20,
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NEW",
+                "IN_REVIEW",
+                "ACCEPTED",
+                "REJECTED"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "من يوم (بتوقيت الرياض)",
+            "schema": {
+              "example": "2026-10-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "حتى يوم (بتوقيت الرياض، شامل)",
+            "schema": {
+              "example": "2026-10-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": false,
+            "in": "query",
+            "description": "رقم الإصدار",
+            "schema": {
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "newest",
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseListDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          },
+          "404": {
+            "description": "النموذج غير موجود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "قائمة ردود النموذج",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/export": {
+      "get": {
+        "description": "يحترم فلاتر القائمة نفسها. أعمدة ثابتة: الرقم المرجعي، تاريخ الإرسال (الرياض)، الحالة، الإصدار، ثم الأسئلة. حتى 5000 صف و10 ميغابايت (وإلا 422 EXPORT_TOO_LARGE). القيم التي تبدأ بـ = + - @ تُسبق بعلامة ' لمنع حقن الصيغ.",
+        "operationId": "ResponsesController_export",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "بحث بالرقم المرجعي (كاملًا أو بدايته، مع الشرطات أو دونها)",
+            "schema": {
+              "maxLength": 20,
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NEW",
+                "IN_REVIEW",
+                "ACCEPTED",
+                "REJECTED"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "من يوم (بتوقيت الرياض)",
+            "schema": {
+              "example": "2026-10-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "حتى يوم (بتوقيت الرياض، شامل)",
+            "schema": {
+              "example": "2026-10-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": false,
+            "in": "query",
+            "description": "رقم الإصدار",
+            "schema": {
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "newest",
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ملف CSV بترميز UTF-8 مع BOM"
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          },
+          "422": {
+            "description": "EXPORT_TOO_LARGE"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "تصدير الردود CSV",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}": {
+      "get": {
+        "description": "الأسئلة كما كانت في الإصدار الذي أُرسل عليه الرد، مع الإجابة حسب النوع وسجل تغييرات الحالة. رد من نموذج آخر ⇒ 404.",
+        "operationId": "ResponsesController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseDetailDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          },
+          "404": {
+            "description": "النموذج أو الرد غير موجود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "تفاصيل رد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/status": {
+      "patch": {
+        "description": "NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.",
+        "operationId": "ResponsesController_updateStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateResponseStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatusResultDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك الصلاحية المطلوبة"
+          },
+          "404": {
+            "description": "النموذج أو الرد غير موجود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "تغيير حالة الرد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
     "/api/dashboard/summary": {
       "get": {
         "operationId": "DashboardController_summary",
@@ -1132,7 +1481,7 @@
   },
   "info": {
     "title": "لوحة النماذج — API",
-    "description": "واجهة برمجة المرحلة الأولى. الأخطاء بشكل موحد: { statusCode, code, message, fields?, details? }.\n\nالمصادقة بجلسة في Cookie HttpOnly باسم lp_session.\n\nكل طلب معدِّل (POST/PATCH) يتطلب ترويسة x-csrf-token بقيمة Cookie lp_csrf.",
+    "description": "واجهة برمجة لوحة النماذج. الأخطاء بشكل موحد: { statusCode, code, message, fields?, details? }.\n\nالمصادقة بجلسة في Cookie HttpOnly باسم lp_session.\n\nكل طلب معدِّل (POST/PATCH) يتطلب ترويسة x-csrf-token بقيمة Cookie lp_csrf.",
     "version": "0.1.0",
     "contact": {}
   },
@@ -1226,7 +1575,10 @@
                 "FORMS_EDIT",
                 "FORMS_ARCHIVE",
                 "FORMS_PUBLISH",
-                "FORMS_INTAKE"
+                "FORMS_INTAKE",
+                "RESPONSES_VIEW",
+                "RESPONSES_REVIEW",
+                "RESPONSES_EXPORT"
               ]
             }
           }
@@ -1306,7 +1658,10 @@
                 "FORMS_EDIT",
                 "FORMS_ARCHIVE",
                 "FORMS_PUBLISH",
-                "FORMS_INTAKE"
+                "FORMS_INTAKE",
+                "RESPONSES_VIEW",
+                "RESPONSES_REVIEW",
+                "RESPONSES_EXPORT"
               ]
             }
           },
@@ -1388,7 +1743,10 @@
               "FORMS_EDIT",
               "FORMS_ARCHIVE",
               "FORMS_PUBLISH",
-              "FORMS_INTAKE"
+              "FORMS_INTAKE",
+              "RESPONSES_VIEW",
+              "RESPONSES_REVIEW",
+              "RESPONSES_EXPORT"
             ]
           },
           "label": {
@@ -1402,7 +1760,10 @@
               "FORMS_EDIT",
               "FORMS_ARCHIVE",
               "FORMS_PUBLISH",
-              "FORMS_INTAKE"
+              "FORMS_INTAKE",
+              "RESPONSES_VIEW",
+              "RESPONSES_REVIEW",
+              "RESPONSES_EXPORT"
             ],
             "nullable": true
           }
@@ -1440,7 +1801,10 @@
                 "FORMS_EDIT",
                 "FORMS_ARCHIVE",
                 "FORMS_PUBLISH",
-                "FORMS_INTAKE"
+                "FORMS_INTAKE",
+                "RESPONSES_VIEW",
+                "RESPONSES_REVIEW",
+                "RESPONSES_EXPORT"
               ]
             }
           }
@@ -1469,7 +1833,10 @@
                 "FORMS_EDIT",
                 "FORMS_ARCHIVE",
                 "FORMS_PUBLISH",
-                "FORMS_INTAKE"
+                "FORMS_INTAKE",
+                "RESPONSES_VIEW",
+                "RESPONSES_REVIEW",
+                "RESPONSES_EXPORT"
               ]
             }
           }
@@ -2165,6 +2532,294 @@
         "required": [
           "referenceCode",
           "submittedAt"
+        ]
+      },
+      "ResponseListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "referenceCode": {
+            "type": "string",
+            "example": "K7Q2-M9XD-4TPB"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "IN_REVIEW",
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          },
+          "versionNumber": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "referenceCode",
+          "submittedAt",
+          "status",
+          "versionNumber"
+        ]
+      },
+      "ResponseListDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResponseListItemDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ]
+      },
+      "ResponseVersionDto": {
+        "type": "object",
+        "properties": {
+          "versionNumber": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string",
+            "description": "عنوان النموذج كما نُشر في هذا الإصدار"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "versionNumber",
+          "title",
+          "description",
+          "publishedAt"
+        ]
+      },
+      "AnswerOptionViewDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "selected"
+        ]
+      },
+      "AnswerViewDto": {
+        "type": "object",
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "description": "معرّف السؤال داخل الإصدار"
+          },
+          "position": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SHORT_TEXT",
+              "PARAGRAPH",
+              "SINGLE_CHOICE",
+              "MULTIPLE_CHOICE",
+              "DROPDOWN",
+              "NUMBER",
+              "DATE",
+              "FILE_UPLOAD"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "empty",
+              "text",
+              "number",
+              "date",
+              "choice",
+              "file"
+            ],
+            "description": "empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ file: لا ملفات في هذه المرحلة"
+          },
+          "value": {
+            "type": "string",
+            "description": "النص، أو الرقم كنص عشري، أو التاريخ YYYY-MM-DD"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnswerOptionViewDto"
+            }
+          }
+        },
+        "required": [
+          "questionId",
+          "position",
+          "type",
+          "title",
+          "description",
+          "required",
+          "kind"
+        ]
+      },
+      "StatusChangeDto": {
+        "type": "object",
+        "properties": {
+          "fromStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "IN_REVIEW",
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          },
+          "toStatus": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "IN_REVIEW",
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          },
+          "changedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "changedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "fromStatus",
+          "toStatus",
+          "changedBy",
+          "changedAt"
+        ]
+      },
+      "ResponseDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "referenceCode": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "IN_REVIEW",
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          },
+          "formId": {
+            "type": "string"
+          },
+          "formTitle": {
+            "type": "string",
+            "description": "عنوان النموذج الحالي"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ResponseVersionDto"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnswerViewDto"
+            }
+          },
+          "statusHistory": {
+            "description": "من الأقدم إلى الأحدث",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusChangeDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "referenceCode",
+          "submittedAt",
+          "status",
+          "formId",
+          "formTitle",
+          "version",
+          "answers",
+          "statusHistory"
+        ]
+      },
+      "UpdateResponseStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "IN_REVIEW",
+              "ACCEPTED",
+              "REJECTED"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "UpdateStatusResultDto": {
+        "type": "object",
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "description": "false إن كانت الحالة نفسها (لا يُضاف سجل)"
+          },
+          "response": {
+            "$ref": "#/components/schemas/ResponseDetailDto"
+          }
+        },
+        "required": [
+          "changed",
+          "response"
         ]
       },
       "FormsSummaryDto": {
