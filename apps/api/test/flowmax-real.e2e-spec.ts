@@ -4,6 +4,8 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -19,6 +21,9 @@ import { samples } from './fixtures/files';
  * منفصلة (localhost فقط) بحساب تكامل بصلاحية integrations.forms وحدها. لا يُسمح بأي مضيف آخر،
  * فلا تُنشأ عقارات أو طلبات حقيقية.
  *   FLOWMAX_REAL_URL=http://127.0.0.1:8100 FLOWMAX_REAL_TOKEN_FILE=… FLOWMAX_REAL_DEVELOPER_ID=…
+ *   FLOWMAX_REAL_SITE_URL=… (اختياري: قيمة FRONTEND_URL في نسخة Flowmax نفسها)
+ * يمر التطبيق عبر وكيل محلي إلى Flowmax الحقيقي ليُختبر التعطل وضياع الاستجابة دون خادم وهمي.
+ * يُشغَّل وحده (`npm run test:e2e -- flowmax-real`) لأنه يترك بيانات في قاعدة الاختبار تتوقع بقية الملفات خلوها منها.
  */
 const REAL_URL = process.env.FLOWMAX_REAL_URL;
 const enabled = Boolean(REAL_URL);
@@ -26,6 +31,7 @@ if (enabled && !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(REAL_URL!)) {
   throw new Error('FLOWMAX_REAL_URL must point to a local Flowmax instance');
 }
 const run = enabled ? describe : describe.skip;
+const SITE = process.env.FLOWMAX_REAL_SITE_URL ?? 'http://flowmax-site.localhost:3999';
 
 const ORIGIN = 'http://localhost:3000';
 const ADMIN = { username: 'fr.admin', password: 'FR-admin-pass-2026!' };
@@ -153,18 +159,79 @@ const state = async (responseId: string) =>
 const records = (responseId: string) =>
   `/api/admin/integrations/forms/records/${encodeURIComponent(`lawha:response:${responseId}`)}`;
 
+/**
+ * وكيل بين التطبيق وFlowmax الحقيقي:
+ * - pass: تمرير كما هو.
+ * - down: Flowmax متعطل (503) ولا يصله الطلب.
+ * - drop-create: يمرر طلب الإنشاء إلى Flowmax وينتظر اكتماله ثم يقطع الاتصال قبل وصول الاستجابة.
+ * - hold-create: يحتجز استجابة الإنشاء حتى release() ليُرى «جارٍ الإرسال».
+ */
+type ProxyMode = 'pass' | 'down' | 'drop-create' | 'hold-create';
+const proxyState = {
+  mode: 'pass' as ProxyMode,
+  dropped: 0,
+  release: null as null | (() => void),
+};
+const isCreate = (method: string | undefined, path: string) =>
+  method === 'POST' && /\/api\/admin\/integrations\/forms\/(offers|demands)$/.test(path);
+const proxy = http.createServer((req, res) => {
+  if (proxyState.mode === 'down') {
+    req.resume();
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.end('{"success":false,"error":{"code":"service_unavailable"}}');
+    return;
+  }
+  const target = new URL(req.url ?? '/', REAL_URL);
+  const upstream = http.request(
+    target,
+    { method: req.method, headers: { ...req.headers, host: target.host } },
+    (upRes) => {
+      const create = isCreate(req.method, target.pathname);
+      if (create && proxyState.mode === 'drop-create') {
+        proxyState.mode = 'pass';
+        proxyState.dropped++;
+        upRes.resume();
+        upRes.on('end', () => req.socket.destroy());
+        return;
+      }
+      const forward = () => {
+        res.writeHead(upRes.statusCode ?? 502, upRes.headers);
+        upRes.pipe(res);
+      };
+      if (create && proxyState.mode === 'hold-create') {
+        proxyState.mode = 'pass';
+        proxyState.release = forward;
+        return;
+      }
+      forward();
+    },
+  );
+  upstream.on('error', () => res.destroy());
+  req.pipe(upstream);
+});
+async function waitFor(check: () => Promise<boolean>, ms = 20_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('timed out');
+}
+
 run('تكامل فعلي مع Flowmax محلي منفصل', () => {
   beforeAll(async () => {
     token = readFileSync(process.env.FLOWMAX_REAL_TOKEN_FILE!, 'utf8').trim();
     prisma = new PrismaClient();
     uploadDir = await mkdtemp(join(tmpdir(), 'lawha-fr-'));
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
     Object.assign(process.env, {
       UPLOAD_SCAN_MODE: 'disabled',
       UPLOAD_DIR: uploadDir,
       PUBLIC_UPLOAD_PER_IP_PER_MINUTE: '100000',
       PUBLIC_UPLOAD_PER_FORM_PER_MINUTE: '100000',
       FLOWMAX_ENABLED: 'true',
-      FLOWMAX_API_BASE_URL: REAL_URL,
+      FLOWMAX_API_BASE_URL: proxyUrl,
       FLOWMAX_SERVICE_TOKEN: token,
       FLOWMAX_TIMEOUT_MS: '30000',
       FLOWMAX_MEDIA_TIMEOUT_MS: '60000',
@@ -276,6 +343,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     await app?.get(FlowmaxService).whenIdle();
     await app?.close();
     await prisma?.$disconnect();
+    await new Promise((resolve) => proxy.close(resolve));
     if (uploadDir) await rm(uploadDir, { recursive: true, force: true });
     for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];
     Object.assign(process.env, savedEnv);
@@ -293,7 +361,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     const s = (await state(offerId)).sync;
     expect(s).toMatchObject({ status: 'SENT', operation: 'OFFER', isPublic: false, share: null });
     expect(s.media.map((m: any) => m.status)).toEqual(['SENT', 'SENT', 'SENT']);
-    expect(s.detailUrl).toBe(`http://flowmax-site.localhost:3999/property/${s.flowmaxId}`);
+    expect(s.detailUrl).toBe(`${SITE}/property/${s.flowmaxId}`);
     const record = (await flowmaxApi().get(records(offerId)).expect(200)).body.data;
     expect(record).toMatchObject({
       id: Number(s.flowmaxId),
@@ -346,9 +414,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     await app.get(FlowmaxService).whenIdle();
     const s = (await state(id)).sync;
     expect(s).toMatchObject({ status: 'SENT', operation: 'REQUEST', isPublic: false, share: null });
-    expect(s.detailUrl).toBe(
-      `http://flowmax-site.localhost:3999/properties/demands/${s.flowmaxRef}`,
-    );
+    expect(s.detailUrl).toBe(`${SITE}/properties/demands/${s.flowmaxRef}`);
     const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
     expect(record).toMatchObject({
       reference: s.flowmaxRef,
@@ -358,5 +424,94 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     expect(JSON.stringify(record)).not.toMatch(OWNER);
     const refreshed = await as(reviewer).post(flowmaxUrl(id, '/refresh')).expect(200);
     expect(refreshed.body.sync.share).toBeNull();
+  });
+
+  it('«جارٍ الإرسال» أثناء الإنشاء، ثم «أُرسل» بعد رد Flowmax، ودون مشاركة', async () => {
+    const id = await submit({ operation: 'عرض', title: 'شقة حالة الإرسال (تكامل فعلي)' });
+    proxyState.mode = 'hold-create';
+    await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
+    await waitFor(async () => proxyState.release !== null);
+    expect((await state(id)).sync).toMatchObject({
+      status: 'SENDING',
+      share: null,
+      isPublic: false,
+    });
+    proxyState.release!();
+    proxyState.release = null;
+    await app.get(FlowmaxService).whenIdle();
+    expect((await state(id)).sync).toMatchObject({ status: 'SENT', share: null });
+  });
+
+  it('تعطل Flowmax ⇒ «فشل الإرسال» دون سجل هناك، وإعادة المحاولة تنشئ سجلًا واحدًا', async () => {
+    const id = await submit({ operation: 'عرض', title: 'شقة تعطل Flowmax (تكامل فعلي)' });
+    proxyState.mode = 'down';
+    await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
+    await app.get(FlowmaxService).whenIdle();
+    const failed = (await state(id)).sync;
+    expect(failed).toMatchObject({ status: 'FAILED', flowmaxId: null, share: null });
+    expect(failed.lastError).toBeTruthy();
+    await flowmaxApi().get(records(id)).expect(404);
+
+    proxyState.mode = 'pass';
+    await as(reviewer).post(flowmaxUrl(id, '/retry')).expect(202);
+    await app.get(FlowmaxService).whenIdle();
+    const sent = (await state(id)).sync;
+    expect(sent).toMatchObject({ status: 'SENT', lastError: null });
+    const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+    expect(record).toMatchObject({ id: Number(sent.flowmaxId), images_count: 1, videos_count: 2 });
+  });
+
+  it('وصول الإنشاء إلى Flowmax ثم انقطاع الاتصال قبل الاستجابة ⇒ إعادة المحاولة تعيد السجل نفسه', async () => {
+    const id = await submit({ operation: 'عرض', title: 'شقة انقطاع الاستجابة (تكامل فعلي)' });
+    const dropped = proxyState.dropped;
+    proxyState.mode = 'drop-create';
+    await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
+    await app.get(FlowmaxService).whenIdle();
+    expect(proxyState.dropped).toBe(dropped + 1);
+    expect((await state(id)).sync).toMatchObject({ status: 'FAILED', flowmaxId: null });
+    // السجل أُنشئ فعلًا في Flowmax رغم ضياع الاستجابة
+    const created = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+
+    await as(reviewer).post(flowmaxUrl(id, '/retry')).expect(202);
+    await app.get(FlowmaxService).whenIdle();
+    expect((await state(id)).sync).toMatchObject({ status: 'SENT', flowmaxId: String(created.id) });
+    const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+    expect(record).toMatchObject({ id: created.id, images_count: 1, videos_count: 2 });
+  });
+
+  it('الضغط على الاعتماد مرتين متتاليتين ⇒ سجل تكامل واحد وسجل Flowmax واحد', async () => {
+    const id = await submit({ operation: 'عرض', title: 'شقة اعتماد مزدوج (تكامل فعلي)' });
+    const first = await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
+    const second = await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
+    await app.get(FlowmaxService).whenIdle();
+    expect(second.body.sync.approvedAt).toBe(first.body.sync.approvedAt);
+    expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(1);
+    const s = (await state(id)).sync;
+    expect(s.attempts).toBe(1);
+    const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+    expect(record).toMatchObject({ id: Number(s.flowmaxId), images_count: 1, videos_count: 2 });
+  });
+
+  it('الصلاحيات: دون مراجعة الردود لا اعتماد ولا إعادة ولا نشر، ودون جلسة 401', async () => {
+    const id = await submit({ operation: 'عرض', title: 'شقة الصلاحيات (تكامل فعلي)' });
+    const viewerCreds = { username: 'fr.viewer', password: 'FR-viewer-pass-2026!' };
+    await as(admin)
+      .post('/api/users', {
+        ...viewerCreds,
+        displayName: 'مشاهد',
+        permissions: ['FORMS_VIEW', 'RESPONSES_VIEW'],
+      })
+      .expect(201);
+    const viewer = await login(viewerCreds);
+    await as(viewer).get(flowmaxUrl(id)).expect(200);
+    for (const action of ['/approve', '/retry', '/publish', '/refresh']) {
+      await as(viewer).post(flowmaxUrl(id, action)).expect(403);
+    }
+    await request(app.getHttpServer())
+      .post(flowmaxUrl(id, '/approve'))
+      .set('Origin', ORIGIN)
+      .expect(401);
+    expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(0);
+    await flowmaxApi().get(records(id)).expect(404);
   });
 });
