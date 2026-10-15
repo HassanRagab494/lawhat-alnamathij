@@ -380,3 +380,34 @@ it('بعد النشر: مشاركة واتساب ونسخ الرابط دون ب
   await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://flowmax.test/property/1001'));
   expect(await screen.findByText('نُسخ الرابط.')).toBeTruthy();
 });
+
+it('بعد النشر: ملخص للأدمن بالنوع والموقع والمساحة والسعر والغرف، والمشاركة بلا بيانات المالك', async () => {
+  state.flowmax = {
+    ...published,
+    sync: {
+      ...published.sync!,
+      share: { ...share, areaSqm: 145.5, bedrooms: 3, bathrooms: 2 },
+    },
+  };
+  state.me = user(VIEW);
+  render(<ResponseDetailPage />);
+  const summary = await screen.findByRole('region', { name: 'ملخص السجل المنشور' });
+  const text = summary.textContent ?? '';
+  for (const part of ['عرض — بيع — شقة', 'الرياض — النرجس', '145.5 م²', '850,000 ريال', 'M-1001']) {
+    expect(text).toContain(part);
+  }
+  expect(text).toMatch(/الغرف3/);
+  const wa = screen.getByRole('link', { name: 'مشاركة واتساب' });
+  const message = decodeURIComponent(wa.getAttribute('href')!.split('text=')[1]!);
+  expect(message).toContain('المساحة: 145.5 م² · الغرف: 3 · دورات المياه: 2');
+  expect(message).not.toMatch(/سارة|05\d{8}|\+966/);
+});
+
+it('أثناء النشر التلقائي: حالة «جارٍ النشر» دون زر نشر أو مشاركة', async () => {
+  state.flowmax = { ...draftSent, sync: { ...draftSent.sync!, publishState: 'REQUESTED' } };
+  state.me = user(REVIEW);
+  render(<ResponseDetailPage />);
+  expect(await screen.findByText('جارٍ النشر في Flowmax؛ تتحدث الحالة تلقائيًا.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'نشر في Flowmax' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'مشاركة العقار' })).toBeNull();
+});

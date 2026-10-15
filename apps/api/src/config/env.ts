@@ -83,6 +83,8 @@ const envSchema = z.object({
   FLOWMAX_API_BASE_URL: blankAsUnset(z.string().trim().url().optional()),
   /** رمز حساب تكامل مخصص في Flowmax بصلاحيات العقارات والطلبات فقط (سر؛ لا يُسجَّل). */
   FLOWMAX_SERVICE_TOKEN: blankAsUnset(z.string().trim().min(20).optional()),
+  /** معرّف المطور الداخلي في Flowmax الذي تُنشأ تحته العروض؛ مطلوب عند التفعيل. */
+  FLOWMAX_DEVELOPER_ID: blankAsUnset(z.coerce.number().int().positive().optional()),
   /** مهلة طلبات JSON إلى Flowmax. */
   FLOWMAX_TIMEOUT_MS: blankAsUnset(z.coerce.number().int().min(1000).max(120_000).default(15_000)),
   /** مهلة رفع كل ملف وسائط إلى Flowmax. */
@@ -122,7 +124,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     if (trustError) problems.push(`TRUST_PROXY: ${trustError}`);
   }
   if (env.FLOWMAX_ENABLED) {
-    for (const key of ['FLOWMAX_API_BASE_URL', 'FLOWMAX_SERVICE_TOKEN'] as const) {
+    for (const key of [
+      'FLOWMAX_API_BASE_URL',
+      'FLOWMAX_SERVICE_TOKEN',
+      'FLOWMAX_DEVELOPER_ID',
+    ] as const) {
       if (!env[key]) problems.push(`${key}: مطلوب عند FLOWMAX_ENABLED=true`);
     }
     if (

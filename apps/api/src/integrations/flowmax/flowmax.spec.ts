@@ -17,6 +17,7 @@ const Q = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}
 const ctx = {
   referenceCode: 'K7Q2-ABCD-EFGH',
   submittedAt: new Date('2026-10-14T10:00:00Z'),
+  developerId: 7,
 };
 
 const offerConfig = mappingConfigSchema.parse({
@@ -108,6 +109,9 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
       city: 'الرياض',
       district: 'النرجس',
       priceSar: '850000',
+      areaSqm: 145.5,
+      bedrooms: 3,
+      bathrooms: 2,
     });
   });
 
@@ -133,6 +137,24 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
       '«المدينة»: الإجابة مطلوبة لإنشاء العقار.',
     );
     expect(r.problems.find((p) => p.field === 'property_category')!.message).toContain('«كوخ»');
+  });
+
+  it('المطور الداخلي من FLOWMAX_DEVELOPER_ID: غيابه يمنع اعتماد العرض، والربط القديم له يُتجاهل', () => {
+    const legacy = mappingConfigSchema.parse({
+      fields: { ...offerConfig.fields, developer_id: { constant: '99' } },
+    });
+    const ok = buildFlowmaxRequest(legacy, offerAnswers(), ctx);
+    expect(ok.body.developer_id).toBe(7);
+    const missing = buildFlowmaxRequest(offerConfig, offerAnswers(), {
+      ...ctx,
+      developerId: undefined,
+    });
+    expect(missing.problems).toEqual([
+      {
+        field: 'developer_id',
+        message: 'المطور الداخلي في Flowmax غير مضبوط على الخادم (FLOWMAX_DEVELOPER_ID).',
+      },
+    ]);
   });
 
   it('حقل مطلوب غير مربوط يُذكر صراحة', () => {
@@ -430,12 +452,13 @@ describe('FlowmaxService.process — إرسال دون تكرار ونتيجة �
   }
   const count = (key: string) => mock.properties.filter((p) => p.sourceKey === key).length;
 
-  it('ينشئ السجل وينقل كل مرفق ويحفظ معرّفه، والمسودة ليست عامة', async () => {
+  it('ينشئ السجل وينقل كل مرفق ويحفظ معرّفه، ثم ينشر العرض ويحفظ الرابط', async () => {
     const { svc, row } = service(newSync(1));
     await svc.process('sync-1');
     const r = row();
     expect(r.status).toBe('SENT');
-    expect(r.isPublic).toBe(false);
+    expect(r.publishState).toBe('PUBLISHED');
+    expect(r.isPublic).toBe(true);
     expect(r.detailUrl).toBe(`https://flowmax.test/property/${r.flowmaxId}`);
     const media = r.media as unknown as { status: string; externalId: string }[];
     expect(media.map((m) => m.status)).toEqual(['SENT', 'SENT']);
@@ -443,8 +466,40 @@ describe('FlowmaxService.process — إرسال دون تكرار ونتيجة �
     expect(mock.properties.find((p) => String(p.id) === r.flowmaxId)).toMatchObject({
       images: 1,
       videos: 1,
-      status: 'Draft',
+      status: 'Published',
     });
+  });
+
+  it('فشل النشر بعد الإنشاء: يبقى المعرّف والسبب، والسجل غير عام', async () => {
+    const sync = newSync(8);
+    sync.media = [{ fileId: 'vid-1', role: 'video', status: 'PENDING' }]; // لا صورة ⇒ متطلبات النشر ناقصة
+    const { svc, row } = service(sync);
+    await svc.process('sync-8');
+    expect(row()).toMatchObject({
+      status: 'SENT',
+      publishState: 'FAILED',
+      publishError: 'متطلبات النشر في Flowmax غير مكتملة: images.',
+      isPublic: false,
+    });
+    expect(row().flowmaxId).toBeTruthy();
+  });
+
+  it('إعادة المحاولة تبحث بالمفتاح الفريد أولًا، ولا ترسل طلب إنشاء إن وُجد السجل', async () => {
+    const sync = newSync(9);
+    const first = service(sync);
+    mock.failNext.push({ match: /POST .*\/offers$/, mode: 'drop-after-create' });
+    await first.svc.process('sync-9');
+    expect(first.row()).toMatchObject({ status: 'FAILED', flowmaxId: null });
+    first.row().status = 'PENDING';
+    const before = mock.requests.length;
+    await first.svc.process('sync-9');
+    const calls = mock.requests.slice(before).map((r) => `${r.method} ${r.path.split('?')[0]}`);
+    expect(calls[0]).toBe(
+      `GET /api/admin/integrations/forms/records/${encodeURIComponent(sync.sourceKey)}`,
+    );
+    expect(calls).not.toContain('POST /api/admin/integrations/forms/offers');
+    expect(first.row().status).toBe('SENT');
+    expect(count(sync.sourceKey)).toBe(1);
   });
 
   it('وصول الإنشاء ثم ضياع الاستجابة ⇒ إعادة المحاولة تعيد السجل نفسه', async () => {

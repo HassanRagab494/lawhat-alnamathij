@@ -56,6 +56,7 @@
    | `BACKUP_DB_PASSWORD` و`BACKUP_ENCRYPTION_KEY` | سران لتفعيل النسخ الاحتياطي. بدونهما يعمل التطبيق، وخدمة `backup` تسجل «not configured» ولا تنسخ شيئًا   |
    | `FLOWMAX_ENABLED` و`FLOWMAX_API_BASE_URL`     | ربط Flowmax ([docs/flowmax-integration.md](../../docs/flowmax-integration.md)). دونها يبقى الربط معطّلًا |
    | `FLOWMAX_SERVICE_TOKEN`                       | سر: رمز حساب تكامل مخصص في Flowmax، لا حساب المدير                                                       |
+   | `FLOWMAX_DEVELOPER_ID`                        | معرّف المطور الداخلي في Flowmax                                                                          |
 
 4. لا «Expose ports» ولا منافذ منشورة على المضيف.
 

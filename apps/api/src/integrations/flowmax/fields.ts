@@ -122,14 +122,6 @@ export const FLOWMAX_FIELDS: readonly FieldDef[] = [
     hint: 'يستخدمه Flowmax لتوليد كود العقار؛ عادة قيمة ثابتة.',
   },
   {
-    key: 'developer_id',
-    label: 'معرّف المطور في Flowmax',
-    type: 'integer',
-    operations: OFFER,
-    requiredFor: OFFER,
-    hint: 'عادة قيمة ثابتة (المطور الداخلي).',
-  },
-  {
     key: 'mediation_contract_number',
     label: 'رقم عقد الوساطة',
     type: 'text',
@@ -189,6 +181,9 @@ export const FLOWMAX_FIELDS: readonly FieldDef[] = [
     hint: 'عادة قيمة ثابتة مثل 2026-10.',
   },
 ];
+
+/** حقول قديمة لم تعد تُربط من النموذج (developer_id يأتي من FLOWMAX_DEVELOPER_ID)؛ تُتجاهل إن وُجدت في ربط محفوظ. */
+export const RETIRED_FIELDS: ReadonlySet<string> = new Set(['developer_id']);
 
 export const FIELD_BY_KEY: ReadonlyMap<string, FieldDef> = new Map(
   FLOWMAX_FIELDS.map((f) => [f.key, f]),

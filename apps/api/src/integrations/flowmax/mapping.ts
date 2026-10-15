@@ -4,6 +4,7 @@ import {
   FIELD_BY_KEY,
   FLOWMAX_FIELDS,
   LISTING_PURPOSES,
+  RETIRED_FIELDS,
   PROPERTY_CATEGORIES,
   SYNONYMS,
   normalizeArabic,
@@ -37,6 +38,7 @@ export const mappingConfigSchema = z
   .object({
     fields: z.record(z.string(), fieldSourceSchema).superRefine((fields, ctx) => {
       for (const key of Object.keys(fields)) {
+        if (RETIRED_FIELDS.has(key)) continue;
         const def = FIELD_BY_KEY.get(key);
         if (!def) {
           ctx.addIssue({
@@ -103,6 +105,9 @@ export interface ShareInfo {
   city: string | null;
   district: string | null;
   priceSar: string | null;
+  areaSqm: number | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
 }
 
 export interface BuildResult {
@@ -116,6 +121,8 @@ export interface BuildResult {
 export interface BuildContext {
   referenceCode: string;
   submittedAt: Date;
+  /** المطور الداخلي في Flowmax (FLOWMAX_DEVELOPER_ID)؛ مطلوب لإنشاء العرض. */
+  developerId?: number;
 }
 
 const TRUTHY = new Set(['نعم', 'موافق', 'اوافق', 'موافقه', 'yes', 'true', 'agree', '1']);
@@ -256,6 +263,13 @@ export function buildFlowmaxRequest(
     }
   }
 
+  if (operation === 'OFFER' && !ctx.developerId) {
+    problems.push({
+      field: 'developer_id',
+      message: 'المطور الداخلي في Flowmax غير مضبوط على الخادم (FLOWMAX_DEVELOPER_ID).',
+    });
+  }
+
   const purpose = (values.listing_purpose as string | undefined) ?? null;
   const category = (values.property_category as string | undefined) ?? null;
   const halalas = values.price ? Math.round(Number(values.price) * 100) : undefined;
@@ -277,7 +291,7 @@ export function buildFlowmaxRequest(
       title_ar: values.title_ar,
       description_ar: values.description_ar,
       type_letter: values.type_letter,
-      developer_id: values.developer_id,
+      developer_id: ctx.developerId,
       mediation_contract_number: values.mediation_contract_number,
       contract_day: date?.slice(8, 10),
       contract_month: date?.slice(5, 7),
@@ -337,6 +351,9 @@ export function buildFlowmaxRequest(
     city: (values.city as string | undefined) ?? null,
     district: (values.district as string | undefined) ?? null,
     priceSar: (values.price as string | undefined) ?? null,
+    areaSqm: (values.area_sqm as number | undefined) ?? null,
+    bedrooms: (values.bedrooms_count as number | undefined) ?? null,
+    bathrooms: (values.bathrooms_count as number | undefined) ?? null,
   };
   return { operation, body, share, media, problems };
 }

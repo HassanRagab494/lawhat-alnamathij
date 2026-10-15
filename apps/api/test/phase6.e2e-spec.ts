@@ -170,6 +170,7 @@ beforeAll(async () => {
     FLOWMAX_API_BASE_URL: mock.url,
     FLOWMAX_SERVICE_TOKEN: mock.token,
     FLOWMAX_TIMEOUT_MS: '2000',
+    FLOWMAX_DEVELOPER_ID: '7',
     FLOWMAX_MEDIA_TIMEOUT_MS: '5000',
   });
   app = await startApp();
@@ -455,7 +456,6 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
     consent: { questionId: q('الموافقة').key },
     consent_version: { constant: '2026-10' },
     type_letter: { constant: 'M' },
-    developer_id: { constant: '7' },
     mediation_contract_number: { constant: 'MCN-TEST' },
     contract_date: { constant: '2026-03-15' },
     fal_license_number: { constant: 'FAL-TEST' },
@@ -568,7 +568,7 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
 
   let approvedId: string;
 
-  it('الاعتماد يرسل البيانات وكل مرفق، والمسودة لا تعرض مشاركة عامة', async () => {
+  it('الاعتماد يرسل البيانات وكل مرفق ثم ينشر العرض ويحفظ الرابط، والمشاركة بلا بيانات المالك', async () => {
     const { responseId } = await submitResponse({ title: 'شقة النرجس للاختبار' });
     approvedId = responseId;
     await as(viewer).post(flowmaxUrl(responseId, '/approve')).expect(403);
@@ -580,16 +580,25 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
     expect(s).toMatchObject({
       status: 'SENT',
       operation: 'OFFER',
-      isPublic: false,
-      publishState: 'NONE',
-      share: null,
+      isPublic: true,
+      publishState: 'PUBLISHED',
+    });
+    expect(s.share).toMatchObject({
+      title: 'شقة النرجس للاختبار',
+      city: 'الرياض',
+      priceSar: '850000',
     });
     expect(s.detailUrl).toBe(`https://flowmax.test/property/${s.flowmaxId}`);
     expect(s.media.map((m: any) => m.status)).toEqual(['SENT', 'SENT', 'SENT']);
-    expect(offers(responseId)[0]).toMatchObject({ images: 1, videos: 2, status: 'Draft' });
+    expect(offers(responseId)[0]).toMatchObject({ images: 1, videos: 2, status: 'Published' });
     expect(JSON.stringify(s)).not.toMatch(OWNER);
     const sent = offers(responseId)[0]!.payload;
-    expect(sent).toMatchObject({ requested_price: 85_000_000, contact_phone: '+966551234567' });
+    // المطور الداخلي من FLOWMAX_DEVELOPER_ID
+    expect(sent).toMatchObject({
+      requested_price: 85_000_000,
+      contact_phone: '+966551234567',
+      developer_id: 7,
+    });
     expect(
       (await prisma.formResponse.findUniqueOrThrow({ where: { id: responseId } })).status,
     ).toBe('ACCEPTED');
@@ -666,24 +675,32 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
     expect(offers(responseId)[0]).toMatchObject({ images: 1, videos: 2 });
   });
 
-  it('محتوى مختلف بالمفتاح نفسه يُرفض من Flowmax بـ 409 ويظهر خطأً صريحًا', async () => {
-    const { responseId } = await submitResponse({ title: 'مفتاح بمحتوى مختلف' });
+  it('فقد معرّف Flowmax محليًا ثم إعادة المحاولة: البحث بالمفتاح يعيد السجل نفسه دون إنشاء', async () => {
+    const { responseId } = await submitResponse({ title: 'فقد المعرّف' });
     await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(202);
     await flowmax().whenIdle();
-    // تعديل اللقطة المحفوظة يحاكي إعادة استخدام المفتاح ببيانات مختلفة
+    const first = (await state(responseId)).sync.flowmaxId;
     const sync = await prisma.flowmaxSync.findUniqueOrThrow({ where: { responseId } });
     await prisma.flowmaxSync.update({
       where: { id: sync.id },
-      data: {
-        status: 'FAILED',
-        payload: { ...(sync.payload as object), requested_price: 1 },
-      },
+      data: { status: 'FAILED', flowmaxId: null },
     });
+    const before = mock.requests.length;
     await as(reviewer).post(flowmaxUrl(responseId, '/retry')).expect(202);
     await flowmax().whenIdle();
+    const calls = mock.requests.slice(before).map((r) => `${r.method} ${r.path}`);
+    expect(calls[0]).toBe(
+      `GET /api/admin/integrations/forms/records/${encodeURIComponent(sourceKey(responseId))}`,
+    );
+    expect(
+      calls.some(
+        (c) =>
+          c.startsWith('POST /api/admin/integrations/forms/offers ') ||
+          c === 'POST /api/admin/integrations/forms/offers',
+      ),
+    ).toBe(false);
     const s = (await state(responseId)).sync;
-    expect(s.status).toBe('FAILED');
-    expect(s.lastError).toBe('رفض Flowmax مفتاح التكامل لأنه استُخدم ببيانات مختلفة (409).');
+    expect(s).toMatchObject({ status: 'SENT', flowmaxId: first });
     expect(offers(responseId)).toHaveLength(1);
   });
 

@@ -8,6 +8,7 @@ import {
   OPERATION_LABELS,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_TONES,
+  formatPriceSar,
   shareText,
   whatsappShareUrl,
   type FlowmaxShare,
@@ -64,6 +65,46 @@ export function ShareActions({ share, url }: { share: FlowmaxShare; url: string 
         {note}
       </p>
     </div>
+  );
+}
+
+/** ملخص السجل المنشور للإدارة: من الحقول العامة نفسها التي تُشارك (لا بيانات المالك). */
+function PublishedSummary({ share, reference }: { share: FlowmaxShare; reference: string | null }) {
+  const rows: [string, string | null][] = [
+    [
+      'النوع',
+      [OPERATION_LABELS[share.operation], share.purpose, share.category]
+        .filter(Boolean)
+        .join(' — '),
+    ],
+    ['المدينة والحي', [share.city, share.district].filter(Boolean).join(' — ') || null],
+    ['المساحة', share.areaSqm != null ? `${share.areaSqm} م²` : null],
+    [
+      share.operation === 'REQUEST' ? 'الميزانية' : 'السعر',
+      share.priceSar ? formatPriceSar(share.priceSar) : null,
+    ],
+    ['الغرف', share.bedrooms != null ? String(share.bedrooms) : null],
+    ['دورات المياه', share.bathrooms != null ? String(share.bathrooms) : null],
+    ['الرقم في Flowmax', reference],
+  ];
+  return (
+    <section aria-label="ملخص السجل المنشور" className="rounded-xl bg-white/70 p-3 text-sm">
+      <p dir="auto" className="mb-2 font-bold text-ink">
+        {share.title}
+      </p>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+        {rows
+          .filter(([, v]) => v)
+          .map(([label, value]) => (
+            <div key={label} className="flex flex-col">
+              <dt className="text-xs text-muted">{label}</dt>
+              <dd dir="auto" className="font-semibold text-ink">
+                {value}
+              </dd>
+            </div>
+          ))}
+      </dl>
+    </section>
   );
 }
 
@@ -133,11 +174,13 @@ export function FlowmaxPanel({
   }, [load]);
 
   const status = state?.sync?.status;
+  const publishing = state?.sync?.publishState === 'REQUESTED';
   useEffect(() => {
-    if (status !== 'PENDING' && status !== 'SENDING') return;
+    // الإرسال ثم النشر يتمان في الخلفية: تتحدث الحالة حتى يكتملا
+    if (status !== 'PENDING' && status !== 'SENDING' && !publishing) return;
     const t = setTimeout(() => void load(), POLL_MS);
     return () => clearTimeout(t);
-  }, [status, state, load]);
+  }, [status, publishing, state, load]);
 
   async function act(action: 'approve' | 'retry' | 'publish' | 'refresh') {
     setBusy(true);
@@ -171,8 +214,8 @@ export function FlowmaxPanel({
         canReview ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted">
-              الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته ومرفقاته إلى Flowmax. النشر خطوة
-              منفصلة بعد اكتمال الإرسال.
+              الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته ومرفقاته إلى Flowmax، ثم ينشر العرض
+              تلقائيًا بعد نجاح الإرسال. الطلب يُنشر من مراجعة Flowmax.
             </p>
             {problems.length > 0 && (
               <Alert tone="warning" title="بيانات ناقصة تمنع الاعتماد">
@@ -272,10 +315,14 @@ export function FlowmaxPanel({
           {sync.status === 'SENT' && !sync.isPublic && (
             <>
               {sync.publishError && <Alert tone="error">{sync.publishError}</Alert>}
-              {sync.operation === 'OFFER' ? (
+              {sync.operation === 'OFFER' && sync.publishState === 'REQUESTED' ? (
+                <p role="status" className="text-sm text-muted">
+                  جارٍ النشر في Flowmax؛ تتحدث الحالة تلقائيًا.
+                </p>
+              ) : sync.operation === 'OFFER' ? (
                 <>
                   <p className="text-xs text-muted">
-                    أُرسل العقار مسودة؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
+                    أُرسل العقار ولم يُنشر؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
                   </p>
                   {canReview && (
                     <Button onClick={() => void act('publish')} loading={busy}>
@@ -300,7 +347,12 @@ export function FlowmaxPanel({
           {sync.sentAt && (
             <p className="text-xs text-muted">وقت الإرسال: {formatDateTime(sync.sentAt)}</p>
           )}
-          {sync.share && sync.detailUrl && <ShareActions share={sync.share} url={sync.detailUrl} />}
+          {sync.share && sync.detailUrl && (
+            <>
+              <PublishedSummary share={sync.share} reference={sync.flowmaxRef} />
+              <ShareActions share={sync.share} url={sync.detailUrl} />
+            </>
+          )}
         </div>
       )}
       {error && (

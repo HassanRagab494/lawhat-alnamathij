@@ -328,6 +328,7 @@ export class FlowmaxService implements OnModuleInit {
     const { response, answers } = await this.responseAnswers(formId, responseId);
     const built = buildFlowmaxRequest(config, answers, {
       referenceCode: response.referenceCode,
+      developerId: this.env.FLOWMAX_DEVELOPER_ID,
       submittedAt: response.submittedAt,
     });
     return { built, incompatible: incompatibleMedia(built.media) };
@@ -549,11 +550,28 @@ export class FlowmaxService implements OnModuleInit {
         'لا يمكن النشر قبل اكتمال إرسال البيانات وكل المرفقات.',
       );
     }
+    if (!(await this.publishOffer(sync))) return this.state(formId, responseId);
+    await this.audit.record({
+      actorId: actor.userId,
+      action: 'response.flowmax_published',
+      entityType: 'response',
+      entityId: responseId,
+      details: { formId },
+      ipAddress: meta.ipAddress,
+    });
+    return this.state(formId, responseId);
+  }
+
+  /**
+   * ينشر العرض بقواعد النشر في Flowmax (حجز بشرط الحالة فلا يتكرر الطلب). يعيد false إن كان منشورًا
+   * أو قيد النشر. الفشل يُبقي المعرّف ويحفظ السبب للعرض وإعادة المحاولة.
+   */
+  private async publishOffer(sync: FlowmaxSync): Promise<boolean> {
     const { count } = await this.prisma.flowmaxSync.updateMany({
       where: { id: sync.id, publishState: { in: ['NONE', 'FAILED'] } },
       data: { publishState: 'REQUESTED', publishError: null },
     });
-    if (!count) return this.state(formId, responseId);
+    if (!count) return false;
     try {
       const record = await this.client!.json<FlowmaxRecord>(
         'POST',
@@ -573,15 +591,7 @@ export class FlowmaxService implements OnModuleInit {
         publishError: describe(error).slice(0, 300),
       });
     }
-    await this.audit.record({
-      actorId: actor.userId,
-      action: 'response.flowmax_published',
-      entityType: 'response',
-      entityId: responseId,
-      details: { formId },
-      ipAddress: meta.ipAddress,
-    });
-    return this.state(formId, responseId);
+    return true;
   }
 
   /** يقرأ حالة السجل من Flowmax (مثلًا بعد نشر الطلب من مراجعة Flowmax). */
@@ -666,13 +676,17 @@ export class FlowmaxService implements OnModuleInit {
     if (!sync) return;
     try {
       if (!this.client) throw new FlowmaxError('network');
-      // Flowmax يعيد السجل نفسه لمفتاح المصدر نفسه، فإعادة هذا الطلب آمنة دائمًا
-      const record = await this.client.json<FlowmaxRecord>(
-        'POST',
-        `${API}/${sync.operation === 'OFFER' ? 'offers' : 'demands'}`,
-        { source_key: sync.sourceKey, ...(sync.payload as Record<string, unknown>) },
-      );
-      await this.save(sync.id, this.recordFields(record));
+      if (!sync.flowmaxId) {
+        // محاولة سابقة ربما أنشأت السجل ثم انقطع الاتصال: يُبحث بالمفتاح الفريد قبل أي إنشاء.
+        // (Flowmax يعيد السجل نفسه لو أُعيد الإنشاء بالمفتاح نفسه؛ البحث يوضح ذلك صراحة ويقلل الطلبات)
+        let record = sync.attempts > 1 ? await this.lookup(this.client, sync.sourceKey) : null;
+        record ??= await this.client.json<FlowmaxRecord>(
+          'POST',
+          `${API}/${sync.operation === 'OFFER' ? 'offers' : 'demands'}`,
+          { source_key: sync.sourceKey, ...(sync.payload as Record<string, unknown>) },
+        );
+        await this.save(sync.id, this.recordFields(record));
+      }
       const failed = sync.operation === 'OFFER' ? await this.sendMedia(this.client, sync) : [];
       if (failed.length) {
         await this.save(sync.id, {
@@ -688,6 +702,8 @@ export class FlowmaxService implements OnModuleInit {
         lastError: null,
         leaseUntil: null,
       });
+      // العرض يُنشر بعد نجاح الإنشاء ونقل كل المرفقات. الطلب يُنشر من مراجعة Flowmax.
+      if (sync.operation === 'OFFER') await this.publishOffer(sync);
     } catch (error) {
       this.logFailure(id, 'send', error);
       await this.save(id, {
@@ -695,6 +711,19 @@ export class FlowmaxService implements OnModuleInit {
         lastError: describe(error).slice(0, 300),
         leaseUntil: null,
       });
+    }
+  }
+
+  /** السجل المرتبط بالمفتاح في Flowmax، أو null إن لم يُنشأ (404). */
+  private async lookup(client: FlowmaxClient, sourceKey: string): Promise<FlowmaxRecord | null> {
+    try {
+      return await client.json<FlowmaxRecord>(
+        'GET',
+        `${API}/records/${encodeURIComponent(sourceKey)}`,
+      );
+    } catch (error) {
+      if (error instanceof FlowmaxError && error.status === 404) return null;
+      throw error;
     }
   }
 

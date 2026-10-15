@@ -233,6 +233,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
       FLOWMAX_ENABLED: 'true',
       FLOWMAX_API_BASE_URL: proxyUrl,
       FLOWMAX_SERVICE_TOKEN: token,
+      FLOWMAX_DEVELOPER_ID: process.env.FLOWMAX_REAL_DEVELOPER_ID,
       FLOWMAX_TIMEOUT_MS: '30000',
       FLOWMAX_MEDIA_TIMEOUT_MS: '60000',
     });
@@ -329,7 +330,6 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
             consent: key('الموافقة'),
             consent_version: { constant: 'forms-2026-10' },
             type_letter: { constant: 'M' },
-            developer_id: { constant: process.env.FLOWMAX_REAL_DEVELOPER_ID },
             mediation_contract_number: { constant: 'MCN-LOCAL' },
             contract_date: { constant: '2026-03-15' },
             fal_license_number: { constant: 'FAL-LOCAL' },
@@ -351,7 +351,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
 
   let offerId: string;
 
-  it('عرض: اعتمادات متزامنة ⇒ سجل واحد في Flowmax مع الصورة والفيديوهين، والمسودة بلا مشاركة', async () => {
+  it('عرض: اعتمادات متزامنة ⇒ سجل واحد في Flowmax مع الصورة والفيديوهين، ثم النشر والرابط والمشاركة', async () => {
     offerId = await submit({ operation: 'عرض', title: 'شقة النرجس (تكامل فعلي)' });
     const results = await Promise.all(
       [1, 2, 3].map(() => as(reviewer).post(flowmaxUrl(offerId, '/approve'))),
@@ -359,16 +359,27 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     expect(results.map((r) => r.status)).toEqual([202, 202, 202]);
     await app.get(FlowmaxService).whenIdle();
     const s = (await state(offerId)).sync;
-    expect(s).toMatchObject({ status: 'SENT', operation: 'OFFER', isPublic: false, share: null });
+    expect(s).toMatchObject({
+      status: 'SENT',
+      operation: 'OFFER',
+      publishState: 'PUBLISHED',
+      isPublic: true,
+    });
+    expect(s.share).toMatchObject({
+      title: 'شقة النرجس (تكامل فعلي)',
+      city: 'الرياض',
+      district: 'النرجس',
+    });
+    expect(JSON.stringify(s)).not.toMatch(OWNER);
     expect(s.media.map((m: any) => m.status)).toEqual(['SENT', 'SENT', 'SENT']);
     expect(s.detailUrl).toBe(`${SITE}/property/${s.flowmaxId}`);
     const record = (await flowmaxApi().get(records(offerId)).expect(200)).body.data;
     expect(record).toMatchObject({
       id: Number(s.flowmaxId),
-      status: 'Draft',
+      status: 'Published',
       images_count: 1,
       videos_count: 2,
-      is_public: false,
+      is_public: true,
     });
     expect(JSON.stringify(record)).not.toMatch(OWNER);
   });
@@ -426,7 +437,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     expect(refreshed.body.sync.share).toBeNull();
   });
 
-  it('«جارٍ الإرسال» أثناء الإنشاء، ثم «أُرسل» بعد رد Flowmax، ودون مشاركة', async () => {
+  it('«جارٍ الإرسال» دون مشاركة أثناء الإنشاء، ثم الإرسال والنشر بعد رد Flowmax', async () => {
     const id = await submit({ operation: 'عرض', title: 'شقة حالة الإرسال (تكامل فعلي)' });
     proxyState.mode = 'hold-create';
     await as(reviewer).post(flowmaxUrl(id, '/approve')).expect(202);
@@ -439,7 +450,9 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     proxyState.release!();
     proxyState.release = null;
     await app.get(FlowmaxService).whenIdle();
-    expect((await state(id)).sync).toMatchObject({ status: 'SENT', share: null });
+    const done = (await state(id)).sync;
+    expect(done).toMatchObject({ status: 'SENT', publishState: 'PUBLISHED', isPublic: true });
+    expect(done.share).not.toBeNull();
   });
 
   it('تعطل Flowmax ⇒ «فشل الإرسال» دون سجل هناك، وإعادة المحاولة تنشئ سجلًا واحدًا', async () => {

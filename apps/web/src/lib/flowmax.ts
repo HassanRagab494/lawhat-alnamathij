@@ -12,6 +12,10 @@ export interface FlowmaxShare {
   city: string | null;
   district: string | null;
   priceSar: string | null;
+  /** حقول عامة إضافية (اختيارية في السجلات القديمة). */
+  areaSqm?: number | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
 }
 
 export type FlowmaxPublishState = 'NONE' | 'REQUESTED' | 'PUBLISHED' | 'FAILED';
@@ -109,10 +113,22 @@ export function shareText(share: FlowmaxShare, url: string): string {
     place && `الموقع: ${place}`,
     share.priceSar &&
       `${share.operation === 'REQUEST' ? 'الميزانية' : 'السعر'}: ${formatPriceSar(share.priceSar)}`,
+    specsText(share),
     url,
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+/** المساحة والغرف ودورات المياه في سطر واحد، مثل «المساحة: 145.5 م² · الغرف: 3 · دورات المياه: 2». */
+export function specsText(share: FlowmaxShare): string {
+  return [
+    share.areaSqm != null && `المساحة: ${share.areaSqm} م²`,
+    share.bedrooms != null && `الغرف: ${share.bedrooms}`,
+    share.bathrooms != null && `دورات المياه: ${share.bathrooms}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** رابط مشاركة واتساب: النص كله مرمّز بـ encodeURIComponent (لا بيانات خاصة فيه). */
