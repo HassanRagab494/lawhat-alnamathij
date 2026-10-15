@@ -109,10 +109,13 @@ services:
       NODE_ENV: production
     expose:
       - '3000'
+    labels:
+      # الحاوية على شبكتين: يحدد لـ Traefik شبكة coolify للوصول إلى web:3000 (لا عنوان backend الداخلي).
+      - traefik.docker.network=coolify
     networks:
-      # default: الشبكة التي يربط بها Coolify وكيله؛ backend: للوصول إلى api فقط.
-      - default
+      # coolify: شبكة وكيل Coolify (Traefik) الخارجية؛ backend: للوصول إلى api فقط.
       - backend
+      - coolify
 
   backup:
     build:
@@ -144,12 +147,15 @@ services:
       - backend
 
 networks:
-  default: {}
   backend:
     internal: true
     ipam:
       config:
         - subnet: ${BACKEND_SUBNET:-10.213.47.0/28}
+  # شبكة وكيل Coolify الموجودة على الخادم (لا تُنشأ من هنا).
+  coolify:
+    external: true
+    name: coolify
 
 volumes:
   lawha-mysql-data:
