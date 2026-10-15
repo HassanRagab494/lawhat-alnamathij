@@ -6,7 +6,7 @@
 - لا يُرسل أي رد قبل اعتماده صراحة من مستخدم يملك مراجعة الردود.
 
 > **الحالة الحالية: الربط غير مُفعّل في الاستضافة (`FLOWMAX_ENABLED=false`).**
-> نقاط التكامل في فرع Flowmax `feature/forms-integration`، واختُبرت الدورة كاملة على بيئة Flowmax تجريبية محلية بـ MySQL 8.4
+> نقاط التكامل في فرع Flowmax `feature/forms-platform-integration`، واختُبرت الدورة كاملة على بيئة Flowmax تجريبية محلية بـ MySQL 8.4
 > ([docs/verification/flowmax-staging.md](verification/flowmax-staging.md)). لم تُنشر على أي بيئة Flowmax مستضافة.
 
 ## التغيير في Flowmax (ضروري لمنع التكرار)
@@ -16,7 +16,7 @@
 - **سجل تكامل** بقيد فريد على مستوى قاعدة البيانات.
 - **نقاط تكامل مخصصة** تستخدم خدماته الحالية دون تجاوز قواعد التحقق والنشر.
 
-**التعديل في فرع Flowmax `feature/forms-integration`** (يحل محل [`docs/flowmax/forms-integration.patch`](flowmax/forms-integration.patch) الذي بقي للمرجع). الفرع يضيف إلى ملفات الـ patch:
+**التعديل في فرع Flowmax `feature/forms-platform-integration`** (يحل محل [`docs/flowmax/forms-integration.patch`](flowmax/forms-integration.patch) الذي بقي للمرجع). الفرع يضيف إلى ملفات الـ patch:
 
 - **حساب التكامل ورمزه:** الأمر `php artisan flowmax:integrations:forms-token <email> --create --days=90`.
   - ينشئ مشرفًا صلاحيته `integrations.forms` وحدها (يرفض المدير الكامل وأي حساب بصلاحيات أخرى).
