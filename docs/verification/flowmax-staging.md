@@ -16,13 +16,13 @@
 
 ## البيئة
 
-| المكوّن         | التفاصيل                                                                                                                                                                                                    |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Flowmax         | فرع `feature/forms-platform-integration` فوق `origin/main` (`3845d44`). ثلاث عمليات PHP 8.4 على `127.0.0.1:8090-8092`، على قاعدة واحدة، ليكون التزامن عبر HTTP حقيقيًا. `FRONTEND_URL=http://127.0.0.1:3090`         |
-| قواعد البيانات  | MySQL 8.4 معزول على `127.0.0.1:3317` (مجلد بيانات مؤقت أُنشئ لهذه المرحلة): `flowmax_staging_it` و`flowmax_it_test` و`lawha_fmx_staging` و`lawha_fmx_staging_test`. لا قاعدة إنتاج ولا `lawha_test` المحلية |
-| حساب التكامل    | `forms-integration@staging.flowmax.test`: `role=admin` و`admin_permissions=["integrations.forms"]`. رمز بقدرة `["integrations.forms"]` ينتهي بعد 30 يومًا، ويُقرأ من ملف خارج المستودعين                    |
-| منصة النماذج    | API على 4100 وواجهة على 3100، `FLOWMAX_ENABLED=true` في ملف بيئة مؤقت خارج المستودع، `UPLOAD_SCAN_MODE=disabled`                                                                                            |
-| بيانات الاختبار | كلها تجريبية («مالك تجريبي»، أرقام `05000000xx`، مطور «Staging test developer»). لا عقار حقيقي                                                                                                              |
+| المكوّن         | التفاصيل                                                                                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flowmax         | فرع `feature/forms-platform-integration` فوق `origin/main` (`3845d44`). ثلاث عمليات PHP 8.4 على `127.0.0.1:8090-8092`، على قاعدة واحدة، ليكون التزامن عبر HTTP حقيقيًا. `FRONTEND_URL=http://127.0.0.1:3090` |
+| قواعد البيانات  | MySQL 8.4 معزول على `127.0.0.1:3317` (مجلد بيانات مؤقت أُنشئ لهذه المرحلة): `flowmax_staging_it` و`flowmax_it_test` و`lawha_fmx_staging` و`lawha_fmx_staging_test`. لا قاعدة إنتاج ولا `lawha_test` المحلية  |
+| حساب التكامل    | `forms-integration@staging.flowmax.test`: `role=admin` و`admin_permissions=["integrations.forms"]`. رمز بقدرة `["integrations.forms"]` ينتهي بعد 30 يومًا، ويُقرأ من ملف خارج المستودعين                     |
+| منصة النماذج    | API على 4100 وواجهة على 3100، `FLOWMAX_ENABLED=true` في ملف بيئة مؤقت خارج المستودع، `UPLOAD_SCAN_MODE=disabled`                                                                                             |
+| بيانات الاختبار | كلها تجريبية («مالك تجريبي»، أرقام `05000000xx`، مطور «Staging test developer»). لا عقار حقيقي                                                                                                               |
 
 ## Flowmax وحده (`flowmax-http-staging.mjs`، HTTP على MySQL)
 
