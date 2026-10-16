@@ -349,6 +349,11 @@ export function FlowmaxPanel({
           )}
           {sync.share && sync.detailUrl && (
             <>
+              <Alert tone="success">
+                {sync.operation === 'OFFER'
+                  ? 'تم إنشاء العقار ونشره في Flowmax بنجاح.'
+                  : 'نُشر الطلب في Flowmax.'}
+              </Alert>
               <PublishedSummary share={sync.share} reference={sync.flowmaxRef} />
               <ShareActions share={sync.share} url={sync.detailUrl} />
             </>

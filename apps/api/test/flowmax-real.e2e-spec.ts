@@ -128,6 +128,8 @@ async function submit(opts: { operation: string; title: string; consent?: string
     { questionId: q('المدينة').id, value: 'الرياض' },
     { questionId: q('الحي').id, value: 'النرجس' },
     { questionId: q('السعر').id, value: '850000' },
+    { questionId: q('مساحة العقار بالمتر').id, value: '145' },
+    { questionId: q('عدد الغرف').id, value: '3' },
     { questionId: q('اسم المالك').id, value: 'سارة المالكة' },
     { questionId: q('الجوال').id, value: '0551234567' },
     ...(files
@@ -293,6 +295,13 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
       files('الصور', ['png', 'jpg', 'webp']),
       files('الفيديو', ['mp4', 'webm', 'mov']),
       choice('الموافقة', ['نعم، أوافق', 'لا'], false),
+      {
+        type: 'NUMBER',
+        title: 'مساحة العقار بالمتر',
+        required: false,
+        settings: { allowDecimals: true },
+      },
+      { type: 'NUMBER', title: 'عدد الغرف', required: false, settings: { allowDecimals: false } },
     ];
     await as(admin)
       .put(`/api/forms/${formId}/draft`, { revision: 1, title, questions })
@@ -309,38 +318,39 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     ).body.form.publication.publicId;
     form = (await request(app.getHttpServer()).get(`/api/public/forms/${publicId}`).expect(200))
       .body;
-    const key = (t: string) => ({ questionId: q(t).key });
-    await as(admin)
-      .put(`/api/forms/${formId}/flowmax-mapping`, {
-        enabled: true,
-        config: {
-          fields: {
-            operation: key('العملية'),
-            title_ar: key('العنوان'),
-            description_ar: key('الوصف'),
-            property_category: key('نوع العقار'),
-            listing_purpose: key('الغرض'),
-            city: key('المدينة'),
-            district: key('الحي'),
-            price: key('السعر'),
-            contact_name: key('اسم المالك'),
-            contact_phone: key('الجوال'),
-            images: key('الصور'),
-            videos: key('الفيديو'),
-            consent: key('الموافقة'),
-            consent_version: { constant: 'forms-2026-10' },
-            type_letter: { constant: 'M' },
-            mediation_contract_number: { constant: 'MCN-LOCAL' },
-            contract_date: { constant: '2026-03-15' },
-            fal_license_number: { constant: 'FAL-LOCAL' },
-          },
-        },
-      })
-      .expect(200);
+    // لا إعداد ربط: الحقول تُكتشف تلقائيًا من عناوين الأسئلة عند الاعتماد
   }, 120_000);
 
   afterAll(async () => {
     await app?.get(FlowmaxService).whenIdle();
+    // تنظيف بيانات هذا الملف من قاعدة الاختبار حتى لا تؤثر على ترتيب بقية الاختبارات
+    // (المرحلة الأولى تتوقع عدم وجود مدير، والمرحلة النهائية تفحص كل الملفات المرتبطة).
+    if (prisma) {
+      const users = await prisma.user.findMany({
+        where: { username: { in: [ADMIN.username, REVIEWER.username, 'fr.viewer'] } },
+        select: { id: true },
+      });
+      const ids = users.map((u) => u.id);
+      const formIds = (
+        await prisma.form.findMany({ where: { createdById: { in: ids } }, select: { id: true } })
+      ).map((f) => f.id);
+      await prisma.flowmaxSync.deleteMany({ where: { formId: { in: formIds } } });
+      await prisma.uploadedFile.deleteMany({ where: { formId: { in: formIds } } });
+      await prisma.fillSession.deleteMany({ where: { formId: { in: formIds } } });
+      await prisma.formResponseStatusChange.deleteMany({
+        where: { response: { formId: { in: formIds } } },
+      });
+      await prisma.formResponse.deleteMany({ where: { formId: { in: formIds } } });
+      await prisma.formVersionOption.deleteMany({
+        where: { question: { version: { formId: { in: formIds } } } },
+      });
+      await prisma.formVersionQuestion.deleteMany({
+        where: { version: { formId: { in: formIds } } },
+      });
+      await prisma.formVersion.deleteMany({ where: { formId: { in: formIds } } });
+      await prisma.form.deleteMany({ where: { id: { in: formIds } } });
+      await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    }
     await app?.close();
     await prisma?.$disconnect();
     await new Promise((resolve) => proxy.close(resolve));

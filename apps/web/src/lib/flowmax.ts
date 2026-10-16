@@ -1,4 +1,4 @@
-/** أنواع ربط Flowmax في الواجهة ونص المشاركة (مطابقة لـ apps/api/src/integrations/flowmax). */
+/** أنواع تكامل Flowmax في الواجهة ونص المشاركة (مطابقة لـ apps/api/src/integrations/flowmax). */
 
 export type FlowmaxSyncStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED';
 export type FlowmaxOperation = 'OFFER' | 'REQUEST';
@@ -134,51 +134,4 @@ export function specsText(share: FlowmaxShare): string {
 /** رابط مشاركة واتساب: النص كله مرمّز بـ encodeURIComponent (لا بيانات خاصة فيه). */
 export function whatsappShareUrl(text: string): string {
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
-}
-
-/* ---------- إعداد الربط ---------- */
-
-export interface FlowmaxFieldDef {
-  key: string;
-  label: string;
-  type: 'text' | 'integer' | 'decimal' | 'money' | 'enum' | 'date' | 'phone' | 'files' | 'consent';
-  operations: FlowmaxOperation[];
-  requiredFor: FlowmaxOperation[];
-  private?: boolean;
-  values?: Record<string, string>;
-  hint?: string;
-}
-
-export interface FieldSource {
-  questionId?: string;
-  constant?: string;
-  values?: Record<string, string>;
-}
-
-export interface MappingView {
-  integrationEnabled: boolean;
-  enabled: boolean;
-  config: { fields: Record<string, FieldSource> };
-  fields: FlowmaxFieldDef[];
-  questions: { id: string; title: string; type: string; options: string[] }[];
-  updatedAt: string | null;
-}
-
-/** «قيمة الإجابة = قيمة Flowmax» سطرًا لكل تحويل ⇔ كائن. */
-export function parseValueTable(text: string): Record<string, string> | undefined {
-  const out: Record<string, string> = {};
-  for (const line of text.split('\n')) {
-    const i = line.indexOf('=');
-    if (i <= 0) continue;
-    const from = line.slice(0, i).trim();
-    const to = line.slice(i + 1).trim();
-    if (from && to) out[from] = to;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-export function formatValueTable(values: Record<string, string> | undefined): string {
-  return Object.entries(values ?? {})
-    .map(([from, to]) => `${from} = ${to}`)
-    .join('\n');
 }

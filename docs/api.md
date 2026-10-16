@@ -345,6 +345,21 @@
 | الرفع لكل نموذج             | 300 في الدقيقة                  |
 | سعة التخزين الإجمالية       | 20GB (`UPLOAD_STORAGE_MAX_GB`)  |
 
+## تكامل Flowmax
+
+المسارات تحت `/forms/:id/responses/:responseId/flowmax`. التفاصيل في [flowmax-integration.md](flowmax-integration.md).
+
+| الطريقة والمسار  | الوصف                                                                                                                     | الصلاحية                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `GET …/flowmax`  | الحالة: `integrationEnabled` و`mappingEnabled` (يساوي الأول) و`precheck` (الحقول الناقصة والمرفقات غير المتوافقة) و`sync` | `FORMS_VIEW` و`RESPONSES_VIEW`                     |
+| `POST …/approve` | `{excludeFileIds?}`: اعتماد الرد والإرسال في الخلفية؛ 422 `FLOWMAX_INCOMPLETE` مع `fields[]` بالحقول الناقصة بالعربية     | `FORMS_VIEW` و`RESPONSES_VIEW` و`RESPONSES_REVIEW` |
+| `POST …/retry`   | إعادة الإرسال بعد الفشل؛ يبحث بمفتاح الرد قبل أي إنشاء                                                                    | نفسها                                              |
+| `POST …/publish` | إعادة محاولة نشر العرض                                                                                                    | نفسها                                              |
+| `POST …/refresh` | تحديث الحالة من Flowmax                                                                                                   | نفسها                                              |
+
+- **لا مسارات لإعداد ربط يدوي:** حُذف `GET/PUT /forms/:id/flowmax-mapping`؛ التعرّف على الحقول تلقائي من عناوين الأسئلة.
+- **التكامل معطّل** (`FLOWMAX_ENABLED=false`): الحالة تعيد `integrationEnabled: false` دون خطأ، والاعتماد 503 `FLOWMAX_DISABLED`.
+
 ## رموز الأخطاء الشائعة
 
 | code                                                            | الحالة | المعنى                                                                                                 |

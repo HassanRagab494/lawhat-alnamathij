@@ -101,3 +101,11 @@ it.each([true, false])(
     expect(description.value).toBe(keepMine ? 'my description' : 'winner description');
   },
 );
+
+it('لا زر ولا رابط «ربط Flowmax» في صفحة النموذج (التكامل تلقائي)', async () => {
+  render(<FormDetailsPage />);
+  const title = screen.getByRole('textbox', { name: /عنوان النموذج/ }) as HTMLInputElement;
+  await waitFor(() => expect(title.value).toBe('original'));
+  expect(screen.queryByText(/ربط Flowmax/)).toBeNull();
+  expect(document.querySelector('a[href$="/flowmax"]')).toBeNull();
+});

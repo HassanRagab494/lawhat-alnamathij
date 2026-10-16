@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  formatPriceSar,
-  formatValueTable,
-  parseValueTable,
-  shareText,
-  whatsappShareUrl,
-  type FlowmaxShare,
-} from './flowmax';
+import { formatPriceSar, shareText, whatsappShareUrl, type FlowmaxShare } from './flowmax';
 
 const share: FlowmaxShare = {
   title: 'فيلا للبيع',
@@ -51,14 +44,5 @@ describe('نص المشاركة', () => {
   it('formatPriceSar', () => {
     expect(formatPriceSar('850000')).toBe('850,000 ريال');
     expect(formatPriceSar('1000.00')).toBe('1,000 ريال');
-  });
-});
-
-describe('جدول تحويل القيم', () => {
-  it('يحلل السطور ويتجاهل الفارغ والناقص، ويعيد التنسيق', () => {
-    const t = parseValueTable('شقة دوبلكس = duplex\n\nبلا قيمة =\n= x\nأرض = residential_land');
-    expect(t).toEqual({ 'شقة دوبلكس': 'duplex', أرض: 'residential_land' });
-    expect(formatValueTable(t)).toBe('شقة دوبلكس = duplex\nأرض = residential_land');
-    expect(parseValueTable('')).toBeUndefined();
   });
 });

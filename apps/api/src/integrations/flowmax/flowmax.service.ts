@@ -3,7 +3,7 @@ import { Prisma, type FlowmaxSync, type ResponseStatus } from '@prisma/client';
 import { AuditService } from '../../audit/audit.service';
 import type { AuthContext } from '../../auth/auth-context';
 import type { RequestMeta } from '../../auth/decorators';
-import { AppError, Errors, type FieldError } from '../../common/errors';
+import { AppError, Errors } from '../../common/errors';
 import { APP_ENV, type AppEnv } from '../../config/env';
 import { MIME_BY_KIND } from '../../files/file-kind';
 import type { FileStorage } from '../../files/storage';
@@ -11,15 +11,8 @@ import { FILE_STORAGE } from '../../files/uploads.service';
 import { runFormTransaction } from '../../forms/form-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FlowmaxClient, FlowmaxError } from './client';
-import { FLOWMAX_FIELDS } from './fields';
-import {
-  buildFlowmaxRequest,
-  mappingConfigSchema,
-  type AnswerInput,
-  type MappingConfig,
-  type Problem,
-  type ShareInfo,
-} from './mapping';
+import { type AnswerInput, type Problem, type ShareInfo } from './mapping';
+import { buildAutoRequest } from './auto-property';
 import { incompatibleMedia, type IncompatibleMedia, type MediaItem } from './media';
 
 export const FLOWMAX_CLIENT = Symbol('FLOWMAX_CLIENT');
@@ -86,15 +79,6 @@ export interface FlowmaxStateView {
   precheck: FlowmaxPrecheck | null;
 }
 
-export interface MappingView {
-  integrationEnabled: boolean;
-  enabled: boolean;
-  config: MappingConfig;
-  fields: typeof FLOWMAX_FIELDS;
-  questions: { id: string; title: string; type: string; options: string[] }[];
-  updatedAt: string | null;
-}
-
 /** مفتاح المصدر الثابت للرد؛ Flowmax يفرض تفرده مع هوية حساب التكامل. */
 export const sourceKeyFor = (responseId: string) => `lawha:response:${responseId}`;
 export const mediaKeyFor = (sourceKey: string, fileId: string) => `${sourceKey}:file:${fileId}`;
@@ -158,113 +142,12 @@ export class FlowmaxService implements OnModuleInit {
       throw new AppError(
         HttpStatus.SERVICE_UNAVAILABLE,
         'FLOWMAX_DISABLED',
-        'ربط Flowmax غير مفعّل على هذا الخادم.',
+        'تكامل Flowmax غير مفعّل على هذا الخادم.',
       );
     }
   }
 
   // ---------- الربط ----------
-
-  private async latestQuestions(formId: string) {
-    const form = await this.prisma.form.findUnique({
-      where: { id: formId },
-      select: {
-        id: true,
-        versions: {
-          orderBy: { versionNumber: 'desc' },
-          take: 1,
-          select: {
-            questions: {
-              orderBy: { position: 'asc' },
-              select: {
-                logicalId: true,
-                title: true,
-                type: true,
-                options: { orderBy: { position: 'asc' }, select: { label: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-    if (!form) throw Errors.notFound('النموذج غير موجود.');
-    return (form.versions[0]?.questions ?? []).map((q) => ({
-      id: q.logicalId,
-      title: q.title,
-      type: q.type as string,
-      options: q.options.map((o) => o.label),
-    }));
-  }
-
-  async getMapping(formId: string): Promise<MappingView> {
-    const questions = await this.latestQuestions(formId);
-    const row = await this.prisma.formFlowmaxMapping.findUnique({ where: { formId } });
-    return {
-      integrationEnabled: this.integrationEnabled,
-      enabled: row?.enabled ?? false,
-      config: (row?.config as MappingConfig | undefined) ?? { fields: {} },
-      fields: FLOWMAX_FIELDS,
-      questions,
-      updatedAt: row?.updatedAt.toISOString() ?? null,
-    };
-  }
-
-  async saveMapping(
-    actor: AuthContext,
-    formId: string,
-    input: { enabled?: unknown; config?: unknown },
-    meta: RequestMeta,
-  ): Promise<MappingView> {
-    const questions = await this.latestQuestions(formId);
-    const parsed = mappingConfigSchema.safeParse(input.config ?? { fields: {} });
-    const errors: FieldError[] = [];
-    if (typeof input.enabled !== 'boolean') {
-      errors.push({ field: 'enabled', message: 'القيمة يجب أن تكون true أو false.' });
-    }
-    if (!parsed.success) {
-      for (const issue of parsed.error.issues) {
-        errors.push({ field: ['config', ...issue.path].join('.'), message: issue.message });
-      }
-    } else {
-      const byId = new Map(questions.map((q) => [q.id, q]));
-      for (const [key, source] of Object.entries(parsed.data.fields)) {
-        if (!source.questionId) continue;
-        const q = byId.get(source.questionId.toLowerCase());
-        const def = FLOWMAX_FIELDS.find((f) => f.key === key)!;
-        if (!q) {
-          errors.push({
-            field: `config.fields.${key}`,
-            message: 'السؤال غير موجود في آخر إصدار منشور.',
-          });
-        } else if ((def.type === 'files') !== (q.type === 'FILE_UPLOAD')) {
-          errors.push({
-            field: `config.fields.${key}`,
-            message:
-              def.type === 'files' ? 'اختر سؤال رفع ملفات.' : 'لا يُربط هذا الحقل بسؤال ملفات.',
-          });
-        } else {
-          source.questionId = source.questionId.toLowerCase();
-        }
-      }
-    }
-    if (errors.length) throw Errors.validation(errors);
-    const config = parsed.data!;
-    const enabled = input.enabled as boolean;
-    await this.prisma.formFlowmaxMapping.upsert({
-      where: { formId },
-      create: { formId, enabled, config, updatedById: actor.userId },
-      update: { enabled, config, updatedById: actor.userId },
-    });
-    await this.audit.record({
-      actorId: actor.userId,
-      action: 'form.flowmax_mapping_updated',
-      entityType: 'form',
-      entityId: formId,
-      details: { enabled, fields: Object.keys(config.fields) },
-      ipAddress: meta.ipAddress,
-    });
-    return this.getMapping(formId);
-  }
 
   // ---------- الحالة والتحقق المسبق ----------
 
@@ -322,14 +205,14 @@ export class FlowmaxService implements OnModuleInit {
   }
 
   private async build(formId: string, responseId: string) {
-    const mapping = await this.prisma.formFlowmaxMapping.findUnique({ where: { formId } });
-    if (!mapping?.enabled) return null;
-    const config = mappingConfigSchema.parse(mapping.config);
+    if (!this.integrationEnabled) return null;
     const { response, answers } = await this.responseAnswers(formId, responseId);
-    const built = buildFlowmaxRequest(config, answers, {
+    // تعرّف تلقائي على بيانات العقار من عناوين الأسئلة؛ لا إعداد يدوي
+    const built = buildAutoRequest(answers, {
       referenceCode: response.referenceCode,
-      developerId: this.env.FLOWMAX_DEVELOPER_ID,
       submittedAt: response.submittedAt,
+      approvedAt: new Date(),
+      developerId: this.env.FLOWMAX_DEVELOPER_ID,
     });
     return { built, incompatible: incompatibleMedia(built.media) };
   }
@@ -337,10 +220,10 @@ export class FlowmaxService implements OnModuleInit {
   async state(formId: string, responseId: string): Promise<FlowmaxStateView> {
     const response = await this.prisma.formResponse.findFirst({
       where: { id: responseId, formId },
-      select: { id: true, flowmaxSync: true, form: { select: { flowmaxMapping: true } } },
+      select: { id: true, flowmaxSync: true },
     });
     if (!response) throw Errors.notFound('الرد غير موجود.');
-    const mappingEnabled = response.form.flowmaxMapping?.enabled ?? false;
+    const mappingEnabled = this.integrationEnabled;
     let precheck: FlowmaxPrecheck | null = null;
     if (!response.flowmaxSync && this.integrationEnabled && mappingEnabled) {
       const result = await this.build(formId, responseId);
@@ -382,9 +265,10 @@ export class FlowmaxService implements OnModuleInit {
     }
     const result = await this.build(formId, responseId);
     if (!result) {
-      throw Errors.conflict(
-        'FLOWMAX_MAPPING_MISSING',
-        'لم يُفعّل ربط هذا النموذج مع Flowmax بعد. اضبط الربط من إعدادات النموذج.',
+      throw new AppError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'FLOWMAX_DISABLED',
+        'تكامل Flowmax غير مفعّل على هذا الخادم.',
       );
     }
     const { built, incompatible } = result;

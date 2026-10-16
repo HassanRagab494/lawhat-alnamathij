@@ -115,6 +115,8 @@ async function submitResponse(
     operation?: string;
     consent?: string;
     images?: boolean;
+    /** ملف PDF في سؤال «المرفقات» (يُكتشف وسائط، ولا يقبله Flowmax). */
+    attachPdf?: boolean;
   } = {},
 ) {
   const token = await newSession();
@@ -128,6 +130,10 @@ async function submitResponse(
   ).body.id;
   const pdf = (await upload(publicId, token, q('مستند').id, 'صك.pdf', samples.pdf()).expect(201))
     .body.id;
+  const attached = opts.attachPdf
+    ? (await upload(publicId, token, q('المرفقات').id, 'مخطط.pdf', samples.pdf()).expect(201)).body
+        .id
+    : null;
   const answers = [
     { questionId: q('العملية').id, value: opt('العملية', opts.operation ?? 'عرض') },
     ...(opts.consent
@@ -140,11 +146,14 @@ async function submitResponse(
     ...(opts.city === '' ? [] : [{ questionId: q('المدينة').id, value: opts.city ?? 'الرياض' }]),
     { questionId: q('الحي').id, value: 'النرجس' },
     { questionId: q('السعر').id, value: '850000' },
+    { questionId: q('المساحة').id, value: '145' },
+    { questionId: q('عدد الغرف').id, value: '3' },
     { questionId: q('اسم المالك').id, value: 'سارة المالكة' },
     { questionId: q('الجوال').id, value: '0551234567' },
     ...(opts.images === false ? [] : [{ questionId: q('الصور').id, value: [png] }]),
     { questionId: q('الفيديو').id, value: [mp4, webm] },
     { questionId: q('مستند').id, value: [pdf] },
+    ...(attached ? [{ questionId: q('المرفقات').id, value: [attached] }] : []),
   ];
   const res = await request(server())
     .post(`/api/public/forms/${publicId}/responses`)
@@ -234,6 +243,9 @@ beforeAll(async () => {
     files('الصور', ['jpg', 'png', 'webp'], 5, 5),
     files('الفيديو', ['mp4', 'mov', 'webm'], 1, 3),
     files('مستند', ['pdf'], 1, 1),
+    files('المرفقات', ['pdf', 'png'], 1, 1),
+    { type: 'NUMBER', title: 'المساحة', required: false, settings: { allowDecimals: true } },
+    { type: 'NUMBER', title: 'عدد الغرف', required: false, settings: { allowDecimals: false } },
     { ...choice('الموافقة', ['نعم، أوافق', 'لا']), required: false },
   ];
   await as(admin).put(`/api/forms/${formId}/draft`, { revision: 1, title, questions }).expect(200);
@@ -440,34 +452,6 @@ describe('معاينة المرفقات وتنزيلها عبر المسار ا�
 
 describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد نقاط التكامل)', () => {
   const flowmax = () => app.get(FlowmaxService);
-  const fields = (overrides: Record<string, unknown> = {}) => ({
-    operation: { questionId: q('العملية').key },
-    title_ar: { questionId: q('العنوان').key },
-    description_ar: { questionId: q('الوصف').key },
-    property_category: { questionId: q('نوع العقار').key },
-    listing_purpose: { questionId: q('الغرض').key },
-    city: { questionId: q('المدينة').key },
-    district: { questionId: q('الحي').key },
-    price: { questionId: q('السعر').key },
-    contact_name: { questionId: q('اسم المالك').key },
-    contact_phone: { questionId: q('الجوال').key },
-    images: { questionId: q('الصور').key },
-    videos: { questionId: q('الفيديو').key },
-    consent: { questionId: q('الموافقة').key },
-    consent_version: { constant: '2026-10' },
-    type_letter: { constant: 'M' },
-    mediation_contract_number: { constant: 'MCN-TEST' },
-    contract_date: { constant: '2026-03-15' },
-    fal_license_number: { constant: 'FAL-TEST' },
-    ...overrides,
-  });
-  const saveMapping = (overrides: Record<string, unknown> = {}) =>
-    as(admin)
-      .put(`/api/forms/${formId}/flowmax-mapping`, {
-        enabled: true,
-        config: { fields: fields(overrides) },
-      })
-      .expect(200);
   const flowmaxUrl = (responseId: string, action = '') =>
     `/api/forms/${formId}/responses/${responseId}/flowmax${action}`;
   const state = async (responseId: string) =>
@@ -481,37 +465,23 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
     expect(process.env.FLOWMAX_API_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
-  it('الربط: يعدّله من يملك تعديل النماذج فقط، ويرفض سؤالًا بنوع غير مناسب', async () => {
-    await as(viewer).get(`/api/forms/${formId}/flowmax-mapping`).expect(403);
-    await as(reviewer)
-      .put(`/api/forms/${formId}/flowmax-mapping`, { enabled: true, config: { fields: fields() } })
-      .expect(403);
-    const bad = await as(admin)
-      .put(`/api/forms/${formId}/flowmax-mapping`, {
-        enabled: true,
-        config: { fields: fields({ images: { questionId: q('العنوان').key } }) },
-      })
-      .expect(400);
-    expect(bad.body.fields[0]).toEqual({
-      field: 'config.fields.images',
-      message: 'اختر سؤال رفع ملفات.',
-    });
-    const ok = await saveMapping();
-    expect(ok.body.enabled).toBe(true);
-    expect(ok.body.integrationEnabled).toBe(true);
+  it('لا إعداد ربط يدوي: مسارات الربط القديمة غير موجودة، والاعتماد يعمل بالتعرّف التلقائي', async () => {
+    await as(admin).get(`/api/forms/${formId}/flowmax-mapping`).expect(404);
+    await as(admin).put(`/api/forms/${formId}/flowmax-mapping`, { enabled: true }).expect(404);
+    expect(await prisma.formFlowmaxMapping.count({ where: { formId } })).toBe(0);
   });
 
   it('رد ناقص البيانات ⇒ 422 برسالة عربية، دون إرسال أو تغيير الحالة', async () => {
     const { responseId } = await submitResponse({ city: '' });
     const pre = await state(responseId);
     expect(pre.precheck.problems).toEqual([
-      { field: 'city', message: '«المدينة»: الإجابة مطلوبة لإنشاء العقار.' },
+      { field: 'city', message: '«المدينة»: الإجابة مطلوبة.' },
     ]);
     const before = mock.requests.length;
     const res = await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(422);
     expect(res.body.code).toBe('FLOWMAX_INCOMPLETE');
     expect(res.body.fields).toEqual([
-      { field: 'flowmax.city', message: '«المدينة»: الإجابة مطلوبة لإنشاء العقار.' },
+      { field: 'flowmax.city', message: '«المدينة»: الإجابة مطلوبة.' },
     ]);
     expect(await prisma.flowmaxSync.count({ where: { responseId } })).toBe(0);
     expect(
@@ -521,17 +491,28 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
   });
 
   it('المرفقات غير المتوافقة تظهر قبل الاعتماد وتمنعه حتى تُستبعد صراحة، ويُسجَّل الاستبعاد', async () => {
-    // سؤال المستندات (PDF) مربوط بالصور ⇒ ملف لا يقبله Flowmax
-    await saveMapping({ images: { questionId: q('مستند').key } });
-    try {
-      const { responseId, files } = await submitResponse({ title: 'عرض بمرفق غير متوافق' });
+    // PDF في سؤال «المرفقات» (وسائط مكتشفة تلقائيًا) ⇒ ملف لا يقبله Flowmax
+    {
+      const { responseId } = await submitResponse({
+        title: 'عرض بمرفق غير متوافق',
+        attachPdf: true,
+      });
+      const files = {
+        pdf: (
+          await prisma.uploadedFile.findFirstOrThrow({
+            where: { responseId, originalName: 'مخطط.pdf' },
+          })
+        ).id,
+      };
       const pre = await state(responseId);
       expect(pre.precheck.incompatibleMedia).toEqual([
-        { fileId: files.pdf, name: 'صك.pdf', reason: 'Flowmax يقبل صور JPG وPNG وWEBP فقط.' },
+        { fileId: files.pdf, name: 'مخطط.pdf', reason: 'Flowmax يقبل صور JPG وPNG وWEBP فقط.' },
       ]);
       const blocked = await as(reviewer).post(flowmaxUrl(responseId, '/approve')).expect(422);
       expect(blocked.body.code).toBe('FLOWMAX_MEDIA_INCOMPATIBLE');
-      expect(blocked.body.fields[0].message).toBe('«صك.pdf»: Flowmax يقبل صور JPG وPNG وWEBP فقط.');
+      expect(blocked.body.fields[0].message).toBe(
+        '«مخطط.pdf»: Flowmax يقبل صور JPG وPNG وWEBP فقط.',
+      );
       expect(await prisma.flowmaxSync.count({ where: { responseId } })).toBe(0);
 
       await as(reviewer)
@@ -548,8 +529,6 @@ describe('ربط Flowmax (خادم Flowmax وهمي محلي بنفس عقد ن�
         where: { action: 'response.flowmax_approved', entityId: responseId },
       });
       expect((audit.details as any).excludedFileIds).toEqual([files.pdf]);
-    } finally {
-      await saveMapping();
     }
   });
 

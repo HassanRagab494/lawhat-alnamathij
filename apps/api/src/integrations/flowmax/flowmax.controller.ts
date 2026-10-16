@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Param,
   Post,
-  Put,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -28,13 +27,13 @@ import {
 } from '../../auth/decorators';
 import { ParseIdPipe } from '../../common/id.pipe';
 import { THROTTLE, onlyThrottle } from '../../common/throttle';
-import { FlowmaxService, type FlowmaxStateView, type MappingView } from './flowmax.service';
+import { FlowmaxService, type FlowmaxStateView } from './flowmax.service';
 
 const formIdPipe = new ParseIdPipe('النموذج غير موجود.');
 const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
 
 /**
- * ربط Flowmax: إعداد الربط لكل نموذج، واعتماد الرد وإرساله، وإعادة المحاولة.
+ * تكامل Flowmax تلقائي: اعتماد الرد وإرساله وإعادة المحاولة.
  * الاعتماد وإعادة المحاولة يتطلبان مراجعة الردود؛ رؤية الحالة والرابط تتطلب عرض الردود.
  */
 @ApiTags('flowmax')
@@ -45,30 +44,6 @@ const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
 @onlyThrottle(THROTTLE.responses)
 export class FlowmaxController {
   constructor(private readonly flowmax: FlowmaxService) {}
-
-  @Get('flowmax-mapping')
-  @RequirePermissions(Permission.FORMS_VIEW, Permission.FORMS_EDIT)
-  @ApiOperation({ summary: 'إعداد ربط النموذج مع حقول Flowmax' })
-  getMapping(@Param('id', formIdPipe) formId: string): Promise<MappingView> {
-    return this.flowmax.getMapping(formId);
-  }
-
-  @Put('flowmax-mapping')
-  @RequirePermissions(Permission.FORMS_VIEW, Permission.FORMS_EDIT)
-  @ApiSecurity('csrf')
-  @ApiOperation({
-    summary: 'حفظ ربط النموذج مع Flowmax',
-    description:
-      'enabled وconfig.fields: لكل حقل Flowmax إما questionId (المعرّف المنطقي لسؤال في آخر إصدار منشور) أو constant، مع values اختياري لتحويل قيم الاختيار.',
-  })
-  saveMapping(
-    @CurrentAuth() auth: AuthContext,
-    @Param('id', formIdPipe) formId: string,
-    @Body() body: { enabled?: unknown; config?: unknown },
-    @RequestMetaData() meta: RequestMeta,
-  ): Promise<MappingView> {
-    return this.flowmax.saveMapping(auth, formId, body ?? {}, meta);
-  }
 
   @Get('responses/:responseId/flowmax')
   @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW)

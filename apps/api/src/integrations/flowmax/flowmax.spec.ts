@@ -3,109 +3,171 @@ import type { FlowmaxSync } from '@prisma/client';
 import { Readable } from 'node:stream';
 import { startMockFlowmax, type MockFlowmax } from '../../../test/fixtures/flowmax-mock';
 import type { AppEnv } from '../../config/env';
-import { FlowmaxClient, FlowmaxError } from './client';
-import { FlowmaxService } from './flowmax.service';
 import {
-  buildFlowmaxRequest,
-  mappingConfigSchema,
-  normalizePhone,
-  type AnswerInput,
-} from './mapping';
+  buildAutoRequest,
+  detectField,
+  detectFields,
+  extractPhone,
+  splitLocation,
+} from './auto-property';
+import { FlowmaxClient, FlowmaxError } from './client';
+import { normalizeArabic } from './fields';
+import { FlowmaxService } from './flowmax.service';
+import { normalizePhone, type AnswerInput } from './mapping';
 import { incompatibleMedia } from './media';
 
-const Q = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ctx = {
   referenceCode: 'K7Q2-ABCD-EFGH',
   submittedAt: new Date('2026-10-14T10:00:00Z'),
+  approvedAt: new Date('2026-10-15T21:30:00Z'), // 16 أكتوبر بتوقيت الرياض
   developerId: 7,
 };
 
-const offerConfig = mappingConfigSchema.parse({
-  fields: {
-    operation: { questionId: Q(1) },
-    title_ar: { questionId: Q(2) },
-    description_ar: { questionId: Q(3) },
-    property_category: { questionId: Q(4), values: { 'شقة دوبلكس': 'duplex' } },
-    listing_purpose: { questionId: Q(5) },
-    city: { questionId: Q(6) },
-    district: { questionId: Q(7) },
-    price: { questionId: Q(8) },
-    area_sqm: { questionId: Q(9) },
-    bedrooms_count: { questionId: Q(10) },
-    bathrooms_count: { questionId: Q(11) },
-    contact_name: { questionId: Q(12) },
-    contact_phone: { questionId: Q(13) },
-    images: { questionId: Q(14) },
-    videos: { questionId: Q(15) },
-    type_letter: { constant: 'M' },
-    developer_id: { constant: '7' },
-    mediation_contract_number: { constant: 'MCN-01' },
-    contract_date: { constant: '2026-03-15' },
-    fal_license_number: { constant: 'FAL-1' },
-  },
+let seq = 0;
+const ans = (title: string, value: Partial<AnswerInput> = {}): AnswerInput => ({
+  logicalId: `q-${++seq}`,
+  title,
+  type: 'SHORT_TEXT',
+  ...value,
 });
+const text = (title: string, t: string) => ans(title, { text: t });
+const choice = (title: string, c: string) => ans(title, { type: 'SINGLE_CHOICE', choices: [c] });
+const num = (title: string, n: string) => ans(title, { type: 'NUMBER', number: n });
 
-function offerAnswers(
-  overrides: Partial<Record<number, Partial<AnswerInput>>> = {},
-): AnswerInput[] {
-  const base: Record<number, Partial<AnswerInput>> = {
-    1: { type: 'SINGLE_CHOICE', choices: ['عرض'] },
-    2: { type: 'SHORT_TEXT', text: 'شقة مطلة في حي النرجس' },
-    3: { type: 'PARAGRAPH', text: 'ثلاث غرف وصالة' },
-    4: { type: 'DROPDOWN', choices: ['شقة'] },
-    5: { type: 'SINGLE_CHOICE', choices: ['بيع'] },
-    6: { type: 'SHORT_TEXT', text: 'الرياض' },
-    7: { type: 'SHORT_TEXT', text: 'النرجس' },
-    8: { type: 'NUMBER', number: '850000' },
-    9: { type: 'NUMBER', number: '145.5' },
-    10: { type: 'NUMBER', number: '3' },
-    11: { type: 'SHORT_TEXT', text: '٢' },
-    12: { type: 'SHORT_TEXT', text: 'سارة المالكة' },
-    13: { type: 'SHORT_TEXT', text: '0551234567' },
-    14: {
+/** نموذج عرض بعناوين متنوعة كما يكتبها الناس. */
+function offerAnswers(over: Record<string, AnswerInput | null> = {}): AnswerInput[] {
+  const base: Record<string, AnswerInput> = {
+    name: text('الاسم', 'سارة المالكة'),
+    role: choice('الصفة', 'مالك'),
+    op: choice('نوع العملية', 'بيع'),
+    category: choice('نوع العقار', 'شقة'),
+    location: text('المدينة / الحي', 'الرياض / النرجس'),
+    area: text('مساحة العقار بالمتر', '145.5 م²'),
+    price: num('السعر', '850000'),
+    rooms: num('عدد الغرف', '3'),
+    baths: text('الحمامات', '٢'),
+    contact: text('وسيلة التواصل', 'واتساب 0551234567'),
+    media: ans('صور وفيديو العقار', {
       type: 'FILE_UPLOAD',
-      files: [{ id: 'img-1', name: 'واجهة.png', kind: 'PNG', size: 100 }],
-    },
-    15: { type: 'FILE_UPLOAD', files: [{ id: 'vid-1', name: 'جولة.mp4', kind: 'MP4', size: 200 }] },
+      files: [
+        { id: 'img-1', name: 'واجهة.png', kind: 'PNG', size: 100 },
+        { id: 'vid-1', name: 'جولة.mp4', kind: 'MP4', size: 200 },
+      ],
+    }),
   };
-  return Object.entries({ ...base, ...overrides }).map(([n, a]) => ({
-    logicalId: Q(Number(n)),
-    title: `سؤال ${n}`,
-    type: 'SHORT_TEXT',
-    ...a,
-  }));
+  return Object.entries({ ...base, ...over })
+    .filter(([, v]) => v)
+    .map(([, v]) => v!);
 }
 
-describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Flowmax', () => {
-  it('عرض مكتمل ⇒ مسودة عقار بالهللة ، والمشاركة بلا بيانات المالك', () => {
-    const r = buildFlowmaxRequest(offerConfig, offerAnswers(), ctx);
+describe('تطبيع عناوين الأسئلة العربية', () => {
+  it('يزيل التشكيل ويوحّد الهمزات والياء والتاء المربوطة ويتجاهل المسافات والشرطات والرموز', () => {
+    expect(normalizeArabic('المَدِينَة / الحَيّ')).toBe(normalizeArabic('المدينه-الحي'));
+    expect(normalizeArabic('إيجار')).toBe(normalizeArabic('ايجار'));
+    expect(normalizeArabic('مبنى')).toBe(normalizeArabic('مبني'));
+    expect(normalizeArabic('مسؤول')).toBe(normalizeArabic('مسوول'));
+    expect(normalizeArabic('  نوع   العقار؟ ')).toBe('نوعالعقار');
+    expect(normalizeArabic('المساحة (م²)')).toBe(normalizeArabic('المساحة م2'));
+  });
+});
+
+describe('التعرّف التلقائي على الحقول من العناوين', () => {
+  it.each([
+    ['الاسم', 'contact_name'],
+    ['اسم المالك', 'contact_name'],
+    ['الصفة', 'contact_role'],
+    ['وصف العقار', 'description'],
+    ['المدينة', 'city'],
+    ['الحي', 'district'],
+    ['المدينة / الحي', 'location'],
+    ['موقع العقار', 'location'],
+    ['نوع العقار', 'category'],
+    ['نوع العملية', 'operation'],
+    ['نوع الطلب', 'operation'],
+    ['مساحة العقار بالمتر', 'area'],
+    ['السعر المطلوب', 'price'],
+    ['الميزانية', 'budget'],
+    ['عدد الغرف', 'bedrooms'],
+    ['دورات المياه', 'bathrooms'],
+    ['عدد الوحدات', 'units'],
+    ['رقم التواصل', 'phone'],
+    ['وسيلة التواصل', 'phone'],
+    ['الموافقة على التواصل', 'consent'],
+  ])('«%s» ⇒ %s', (title, field) => {
+    expect(detectField(title, false)).toBe(field);
+  });
+
+  it('أسئلة الملفات: الصور والفيديوهات فقط، وغيرها لا يُرسل', () => {
+    expect(detectField('صور العقار', true)).toBe('media');
+    expect(detectField('الصور والفيديوهات', true)).toBe('media');
+    expect(detectField('صورة الصك', true)).toBeNull();
+    expect(detectField('الصور', false)).toBeNull();
+  });
+
+  it('يكتشف كل حقول النموذج دون أي إعداد', () => {
+    const d = detectFields(offerAnswers());
+    expect(Object.keys(d).sort()).toEqual(
+      [
+        'area',
+        'bathrooms',
+        'bedrooms',
+        'category',
+        'contact_name',
+        'contact_role',
+        'location',
+        'media',
+        'operation',
+        'phone',
+        'price',
+      ].sort(),
+    );
+  });
+
+  it('splitLocation وextractPhone', () => {
+    expect(splitLocation('الرياض / النرجس')).toEqual(['الرياض', 'النرجس']);
+    expect(splitLocation('جدة - حي الشاطئ')).toEqual(['جدة', 'الشاطئ']);
+    expect(splitLocation('الدمام، الفيصلية')).toEqual(['الدمام', 'الفيصلية']);
+    expect(extractPhone('واتساب ٠٥٥١٢٣٤٥٦٧')).toBe('+966551234567');
+    expect(extractPhone('اتصل على 055 123 4567')).toBe('+966551234567');
+    expect(extractPhone('بالبريد')).toBeNull();
+    expect(normalizePhone('00971501234567')).toBe('+971501234567');
+  });
+});
+
+describe('buildAutoRequest — من الرد إلى Flowmax تلقائيًا', () => {
+  it('عرض مكتمل ⇒ عقار بقيم الخادم الثابتة، والمشاركة بلا بيانات المالك', () => {
+    const r = buildAutoRequest(offerAnswers(), ctx);
     expect(r.problems).toEqual([]);
     expect(r.operation).toBe('OFFER');
     expect(r.body).toMatchObject({
-      title_ar: 'شقة مطلة في حي النرجس',
+      title_ar: 'شقة للبيع في الرياض — النرجس',
       property_category: 'apartment',
       listing_purpose: 'sale',
+      city: 'الرياض',
+      district: 'النرجس',
       requested_price: 85_000_000,
-      contract_day: '15',
-      contract_month: '03',
-      developer_id: 7,
-      bathrooms_count: 2,
       area_sqm: 145.5,
+      bedrooms_count: 3,
+      bathrooms_count: 2,
       contact_phone: '+966551234567',
+      developer_id: 7,
+      type_letter: 'M',
+      mediation_contract_number: 'LAWHA-K7Q2-ABCD-EFGH',
+      contract_day: '16',
+      contract_month: '10',
       currency: 'SAR',
     });
-    expect(r.body).not.toHaveProperty('platform_code');
-    expect(r.media).toEqual([
-      { fileId: 'img-1', name: 'واجهة.png', kind: 'PNG', size: 100, role: 'image' },
-      { fileId: 'vid-1', name: 'جولة.mp4', kind: 'MP4', size: 200, role: 'video' },
+    expect(String(r.body.description_ar)).toContain('المساحة 145.5 م²');
+    expect(String(r.body.listing_notes)).toContain('الصفة: مالك');
+    expect(r.body).not.toHaveProperty('fal_license_number'); // يملؤه Flowmax من المطور الداخلي
+    expect(r.media.map((m) => [m.fileId, m.role])).toEqual([
+      ['img-1', 'image'],
+      ['vid-1', 'video'],
     ]);
-    const share = JSON.stringify(r.share);
-    expect(share).not.toMatch(/سارة|0551234567|966551234567/);
-    expect(r.share).toEqual({
-      title: 'شقة مطلة في حي النرجس',
-      operation: 'OFFER',
-      purpose: 'بيع',
+    expect(JSON.stringify(r.share)).not.toMatch(/سارة|0551234567|966551234567/);
+    expect(r.share).toMatchObject({
       category: 'شقة',
+      purpose: 'بيع',
       city: 'الرياض',
       district: 'النرجس',
       priceSar: '850000',
@@ -115,41 +177,73 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
     });
   });
 
-  it('جدول التحويل يسبق المرادفات، والإيجار اليومي يرسل سعر الليلة', () => {
-    const r = buildFlowmaxRequest(
-      offerConfig,
-      offerAnswers({ 4: { choices: ['شقة دوبلكس'] }, 5: { choices: ['إيجار يومي'] } }),
+  it('عناوين بديلة: «موقع العقار» و«نوع الطلب» و«رقم التواصل» و«عنوان العقار» و«وصف العقار»', () => {
+    const r = buildAutoRequest(
+      [
+        choice('نوع الطلب', 'إيجار'),
+        choice('نوع العقار', 'فيلا'),
+        text('عنوان العقار', 'فيلا مودرن'),
+        text('وصف العقار', 'تشطيب فاخر'),
+        text('موقع العقار', 'جدة - حي الشاطئ'),
+        num('المساحة', '420'),
+        num('عدد الغرف', '6'),
+        num('قيمة الإيجار', '120000'),
+        text('رقم التواصل', '0500000098'),
+      ],
       ctx,
     );
-    expect(r.body.property_category).toBe('duplex');
-    expect(r.body.original_nightly_price).toBe(85_000_000);
-    expect(r.body.requested_price).toBeUndefined();
+    expect(r.problems).toEqual([]);
+    expect(r.body).toMatchObject({
+      title_ar: 'فيلا مودرن',
+      description_ar: 'تشطيب فاخر',
+      listing_purpose: 'rent',
+      property_category: 'villa',
+      city: 'جدة',
+      district: 'الشاطئ',
+      requested_price: 12_000_000,
+    });
   });
 
-  it('يمنع الاعتماد برسائل عربية عند نقص المطلوب أو قيمة غير معروفة', () => {
-    const r = buildFlowmaxRequest(
-      offerConfig,
-      offerAnswers({ 6: { text: '' }, 8: { number: null }, 4: { choices: ['كوخ'] } }),
+  it('رد ناقص ⇒ يمنع الاعتماد ويذكر كل حقل ناقص بالعربية', () => {
+    const r = buildAutoRequest(
+      offerAnswers({ location: text('المدينة', 'الرياض'), price: null }),
       ctx,
     );
-    expect(r.problems.map((p) => p.field).sort()).toEqual(['city', 'price', 'property_category']);
-    expect(r.problems.find((p) => p.field === 'city')!.message).toBe(
-      '«المدينة»: الإجابة مطلوبة لإنشاء العقار.',
-    );
-    expect(r.problems.find((p) => p.field === 'property_category')!.message).toContain('«كوخ»');
+    expect(r.problems).toEqual([
+      { field: 'district', message: '«الحي»: الإجابة مطلوبة.' },
+      { field: 'price', message: '«السعر»: الإجابة مطلوبة.' },
+    ]);
   });
 
-  it('المطور الداخلي من FLOWMAX_DEVELOPER_ID: غيابه يمنع اعتماد العرض، والربط القديم له يُتجاهل', () => {
-    const legacy = mappingConfigSchema.parse({
-      fields: { ...offerConfig.fields, developer_id: { constant: '99' } },
-    });
-    const ok = buildFlowmaxRequest(legacy, offerAnswers(), ctx);
-    expect(ok.body.developer_id).toBe(7);
-    const missing = buildFlowmaxRequest(offerConfig, offerAnswers(), {
-      ...ctx,
-      developerId: undefined,
-    });
-    expect(missing.problems).toEqual([
+  it('الحقول المطلوبة حسب نوع العقار', () => {
+    const land = buildAutoRequest(
+      offerAnswers({ category: choice('نوع العقار', 'أرض'), rooms: null, area: null }),
+      ctx,
+    );
+    expect(land.problems.map((p) => p.field)).toEqual(['area']);
+    const apt = buildAutoRequest(offerAnswers({ rooms: null }), ctx);
+    expect(apt.problems).toEqual([{ field: 'bedrooms', message: '«عدد الغرف»: الإجابة مطلوبة.' }]);
+    const building = buildAutoRequest(
+      offerAnswers({ category: choice('نوع العقار', 'عمارة') }),
+      ctx,
+    );
+    expect(building.problems).toEqual([
+      { field: 'units', message: '«عدد الوحدات»: الإجابة مطلوبة.' },
+    ]);
+  });
+
+  it('نوع العملية: غيابه أو قيمة غير معروفة يمنع الاعتماد', () => {
+    expect(buildAutoRequest(offerAnswers({ op: null }), ctx).problems).toEqual([
+      { field: 'operation', message: '«نوع العملية»: الإجابة مطلوبة.' },
+    ]);
+    expect(
+      buildAutoRequest(offerAnswers({ op: choice('نوع العملية', 'هبة') }), ctx).problems[0]!
+        .message,
+    ).toContain('«هبة»');
+  });
+
+  it('المطور الداخلي من FLOWMAX_DEVELOPER_ID: غيابه يمنع اعتماد العرض', () => {
+    expect(buildAutoRequest(offerAnswers(), { ...ctx, developerId: undefined }).problems).toEqual([
       {
         field: 'developer_id',
         message: 'المطور الداخلي في Flowmax غير مضبوط على الخادم (FLOWMAX_DEVELOPER_ID).',
@@ -157,82 +251,45 @@ describe('buildFlowmaxRequest — تحويل الإجابات إلى حقول Fl
     ]);
   });
 
-  it('حقل مطلوب غير مربوط يُذكر صراحة', () => {
-    const { fal_license_number: _omit, ...fields } = offerConfig.fields;
-    const r = buildFlowmaxRequest({ fields }, offerAnswers(), ctx);
-    expect(r.problems).toEqual([
-      {
-        field: 'fal_license_number',
-        message: '«رقم رخصة فال»: غير مربوط بسؤال أو قيمة في إعداد Flowmax.',
-      },
-    ]);
-  });
-
-  it('الطلب يحتاج جوالًا صالحًا وموافقة، ولا يحمل مفتاحًا من المتصل (Flowmax يشتقه من مفتاح المصدر)', () => {
-    const config = mappingConfigSchema.parse({
-      fields: {
-        ...offerConfig.fields,
-        consent: { questionId: Q(16) },
-        consent_version: { constant: '2026-10' },
-      },
-    });
-    const ok = buildFlowmaxRequest(
-      config,
+  it('طلب شراء ⇒ طلب عقار بالميزانية والجوال والموافقة، دون وسائط', () => {
+    const r = buildAutoRequest(
       [
-        ...offerAnswers({ 1: { choices: ['طلب'] } }),
-        { logicalId: Q(16), title: 'الموافقة', type: 'SINGLE_CHOICE', choices: ['نعم، أوافق'] },
+        text('الاسم', 'باحث تجريبي'),
+        choice('نوع العملية', 'طلب شراء'),
+        choice('نوع العقار', 'شقة'),
+        text('المدينة', 'الرياض'),
+        num('الميزانية', '900000'),
+        num('عدد الغرف', '4'),
+        text('رقم الجوال', '0551234567'),
+        choice('الموافقة على التواصل', 'نعم، أوافق'),
       ],
       ctx,
     );
-    expect(ok.problems).toEqual([]);
-    expect(ok.operation).toBe('REQUEST');
-    expect(ok.body).toMatchObject({
+    expect(r.problems).toEqual([]);
+    expect(r.operation).toBe('REQUEST');
+    expect(r.body).toMatchObject({
+      listing_purpose: 'sale',
+      budget_max_halalas: 90_000_000,
       requester_phone: '+966551234567',
-      budget_max_halalas: 85_000_000,
-      consent_version: '2026-10',
-      criteria: { area_sqm: 145.5, bedrooms_count: 3, bathrooms_count: 2 },
+      requester_name: 'باحث تجريبي',
+      criteria: { bedrooms_count: 4 },
     });
-    expect(String(ok.body.intake_consent_evidence)).toContain(ctx.referenceCode);
-    expect(ok.body).not.toHaveProperty('idempotency_key');
-    expect(ok.media).toEqual([]);
+    expect(r.body).not.toHaveProperty('idempotency_key');
+    expect(r.media).toEqual([]);
+  });
 
-    const bad = buildFlowmaxRequest(
-      config,
+  it('الطلب دون موافقة أو جوال صالح يُمنع', () => {
+    const r = buildAutoRequest(
       [
-        ...offerAnswers({ 1: { choices: ['طلب'] }, 13: { text: '12' } }),
-        { logicalId: Q(16), title: 'الموافقة', type: 'SINGLE_CHOICE', choices: ['لا'] },
+        choice('نوع الطلب', 'طلب إيجار'),
+        choice('نوع العقار', 'شقة'),
+        text('المدينة', 'الرياض'),
+        num('الميزانية', '50000'),
+        text('رقم الجوال', '12'),
       ],
       ctx,
     );
-    expect(bad.problems.map((p) => p.field).sort()).toEqual(['consent', 'contact_phone']);
-  });
-
-  it('مخطط الربط يرفض الحقول المجهولة والمصدر المزدوج والقيم غير المقبولة', () => {
-    const r = mappingConfigSchema.safeParse({
-      fields: {
-        nope: { constant: 'x' },
-        city: { constant: 'الرياض', questionId: Q(1) },
-        property_category: { questionId: Q(2), values: { كوخ: 'hut' } },
-        images: { constant: 'x' },
-      },
-    });
-    expect(r.success).toBe(false);
-    const paths = r.success ? [] : r.error.issues.map((i) => i.path.join('.'));
-    expect(paths).toEqual(
-      expect.arrayContaining([
-        'fields.nope',
-        'fields.city',
-        'fields.property_category.values',
-        'fields.images',
-      ]),
-    );
-  });
-
-  it('normalizePhone', () => {
-    expect(normalizePhone('0551234567')).toBe('+966551234567');
-    expect(normalizePhone('٠٥٥١٢٣٤٥٦٧')).toBe('+966551234567');
-    expect(normalizePhone('00971501234567')).toBe('+971501234567');
-    expect(normalizePhone('123')).toBeNull();
+    expect(r.problems.map((p) => p.field)).toEqual(['phone', 'consent']);
   });
 });
 
