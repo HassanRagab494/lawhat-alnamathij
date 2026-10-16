@@ -144,7 +144,19 @@ export type Detection = Partial<Record<AutoField, AnswerInput[]>>;
 export function detectFields(answers: AnswerInput[]): Detection {
   const out: Detection = {};
   for (const a of answers) {
-    const field = detectField(a.title, a.type === 'FILE_UPLOAD');
+    let field = detectField(a.title, a.type === 'FILE_UPLOAD');
+    // Some forms call both the property category and sale/rent question «نوع العقار».
+    // Only exact, unambiguous selected operation labels can disambiguate that title.
+    if (
+      field === 'category' &&
+      a.choices?.length &&
+      a.choices.every((value) => {
+        const normalized = normalizeArabic(value);
+        return Boolean(OPERATION_VALUES[normalized]) && !CATEGORY_VALUES[normalized];
+      })
+    ) {
+      field = 'operation';
+    }
     if (field) (out[field] ??= []).push(a);
   }
   return out;

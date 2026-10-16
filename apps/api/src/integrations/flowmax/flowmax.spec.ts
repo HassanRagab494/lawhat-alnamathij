@@ -132,9 +132,36 @@ describe('التعرّف التلقائي على الحقول من العناو�
     expect(extractPhone('بالبريد')).toBeNull();
     expect(normalizePhone('00971501234567')).toBe('+971501234567');
   });
+
+  it.each(['بيع', 'ايجار', 'طلب شراء'])('يميّز سؤالين بعنوان نوع العقار عند اختيار %s', (value) => {
+    const category = choice('نوع العقار', 'شقه');
+    const operation = choice('نوع العقار', value);
+    for (const answers of [
+      [category, operation],
+      [operation, category],
+    ]) {
+      const detected = detectFields(answers);
+      expect(detected.category).toEqual([category]);
+      expect(detected.operation).toEqual([operation]);
+    }
+  });
+
+  it('لا يستنتج عملية من نص حر أو سؤال غير متعلق أو اختيارات مختلطة', () => {
+    expect(detectFields([text('نوع العقار', 'بيع')]).operation).toBeUndefined();
+    expect(detectFields([choice('الصفة', 'بيع')]).operation).toBeUndefined();
+    expect(
+      detectFields([ans('نوع العقار', { choices: ['بيع', 'شقة'] })]).operation,
+    ).toBeUndefined();
+  });
 });
 
 describe('buildAutoRequest — من الرد إلى Flowmax تلقائيًا', () => {
+  it('ينشئ عرضًا من سؤالَي نوع العقار دون ربط يدوي أو تغيير العنوان', () => {
+    const result = buildAutoRequest(offerAnswers({ op: choice('نوع العقار', 'بيع') }), ctx);
+    expect(result.problems).toEqual([]);
+    expect(result.operation).toBe('OFFER');
+    expect(result.body).toMatchObject({ property_category: 'apartment', listing_purpose: 'sale' });
+  });
   it('عرض مكتمل ⇒ عقار بقيم الخادم الثابتة، والمشاركة بلا بيانات المالك', () => {
     const r = buildAutoRequest(offerAnswers(), ctx);
     expect(r.problems).toEqual([]);
