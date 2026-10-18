@@ -8,6 +8,12 @@ export class PublicOptionDto {
   @ApiProperty() label!: string;
 }
 
+export class PublicShowIfDto {
+  @ApiProperty({ description: 'المفتاح المنطقي لسؤال الاختيار السابق' }) questionKey!: string;
+  @ApiProperty({ type: [String], description: 'المفاتيح المنطقية للخيارات التي تُظهر السؤال' })
+  optionKeys!: string[];
+}
+
 export class PublicQuestionDto {
   @ApiProperty({ description: 'معرّف السؤال داخل هذا الإصدار (يُرسل في الإجابة)' }) id!: string;
   @ApiProperty({ description: 'مفتاح منطقي ثابت عبر الإصدارات' }) key!: string;
@@ -17,6 +23,13 @@ export class PublicQuestionDto {
   @ApiProperty() required!: boolean;
   @ApiProperty({ type: 'object', additionalProperties: true }) settings!: Record<string, unknown>;
   @ApiProperty({ type: [PublicOptionDto] }) options!: PublicOptionDto[];
+  @ApiProperty({
+    type: PublicShowIfDto,
+    nullable: true,
+    description:
+      'شرط الظهور؛ null = ظاهر دائمًا. السؤال المخفي ليس إجباريًا، والخادم يرفض أي إجابة له.',
+  })
+  showIf!: PublicShowIfDto | null;
 }
 
 export class PublicFormDto {

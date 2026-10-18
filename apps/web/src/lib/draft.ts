@@ -15,6 +15,7 @@ import {
 export interface ServerOption {
   id: string;
   label: string;
+  semanticKey?: string | null;
 }
 
 export interface ServerQuestion {
@@ -25,6 +26,10 @@ export interface ServerQuestion {
   required: boolean;
   settings: Record<string, unknown>;
   options: ServerOption[];
+  /** شرط الظهور بمعرّفات المسودة. */
+  showIf?: { questionId: string; optionIds: string[] } | null;
+  /** هوية دلالية يضعها القالب لربط Flowmax. */
+  semanticKey?: string | null;
 }
 
 export interface FormDraft extends FormItem {
@@ -55,6 +60,13 @@ export interface EditorOption {
   /** معرّف الخادم إن كان الخيار محفوظًا. */
   id?: string;
   label: string;
+  semanticKey?: string | null;
+}
+
+/** شرط الظهور في المحرر بالمفاتيح المحلية، فيبقى صحيحًا عند إعادة الترتيب قبل الحفظ. */
+export interface EditorShowIf {
+  questionKey: string;
+  optionKeys: string[];
 }
 
 export interface EditorQuestion {
@@ -66,6 +78,8 @@ export interface EditorQuestion {
   required: boolean;
   settings: EditorSettings;
   options: EditorOption[];
+  showIf: EditorShowIf | null;
+  semanticKey?: string | null;
 }
 
 export interface EditorDraft {
@@ -121,6 +135,7 @@ export function newQuestion(type: QuestionType): EditorQuestion {
     description: '',
     required: false,
     settings: defaultSettings(type),
+    showIf: null,
     options: isChoiceType(type)
       ? [
           { key: newKey(), label: 'الخيار 1' },
@@ -135,7 +150,7 @@ const str = (v: unknown) => (typeof v === 'number' || typeof v === 'string' ? St
 export function fromServer(
   draft: Pick<FormDraft, 'title' | 'description' | 'questions'>,
 ): EditorDraft {
-  return {
+  const result: EditorDraft = {
     title: draft.title,
     description: draft.description ?? '',
     questions: draft.questions.map((q) => {
@@ -162,10 +177,38 @@ export function fromServer(
           maxFileSizeMb: str(s.maxFileSizeMb),
           maxFiles: str(s.maxFiles),
         },
-        options: q.options.map((o) => ({ key: newKey(), id: o.id, label: o.label })),
+        options: q.options.map((o) => ({
+          key: newKey(),
+          id: o.id,
+          label: o.label,
+          semanticKey: o.semanticKey ?? null,
+        })),
+        showIf: null,
+        semanticKey: q.semanticKey ?? null,
       };
     }),
   };
+  // الشروط بمعرّفات الخادم ⇒ مفاتيح محلية (بعد إنشاء مفاتيح كل الأسئلة والخيارات)
+  const byId = new Map(result.questions.map((q) => [q.id, q]));
+  draft.questions.forEach((sq, i) => {
+    const target = sq.showIf ? byId.get(sq.showIf.questionId) : undefined;
+    if (!sq.showIf || !target) return;
+    const optionKeys = target.options
+      .filter((o) => o.id && sq.showIf!.optionIds.includes(o.id))
+      .map((o) => o.key);
+    result.questions[i]!.showIf = { questionKey: target.key, optionKeys };
+  });
+  return result;
+}
+
+/** الأسئلة التي يعتمد ظهورها على سؤال معيّن (لتحذير الحذف وتغيير النوع). */
+export function dependentsOf(draft: EditorDraft, key: string): EditorQuestion[] {
+  return draft.questions.filter((q) => q.showIf?.questionKey === key);
+}
+
+/** يزيل شروط الظهور التي تعتمد على سؤال معيّن (عند حذفه)، فتصبح تلك الأسئلة ظاهرة دائمًا. */
+export function clearConditionsOn(questions: EditorQuestion[], key: string): EditorQuestion[] {
+  return questions.map((q) => (q.showIf?.questionKey === key ? { ...q, showIf: null } : q));
 }
 
 /** الحقول التي تخص كل نوع من الإعدادات. */
@@ -229,8 +272,25 @@ export interface SaveDraftPayload {
     description: string | null;
     required: boolean;
     settings: Record<string, unknown>;
-    options: { id?: string; label: string }[];
+    showIf?: { questionIndex: number; optionIndexes: number[] } | null;
+    semanticKey?: string | null;
+    options: { id?: string; label: string; semanticKey?: string | null }[];
   }[];
+}
+
+/** يحوّل شرط المحرر إلى مواقع القائمة المرسلة؛ المرجع المحذوف يُرسل كما هو ليرفضه التحقق. */
+function showIfPayload(
+  draft: EditorDraft,
+  q: EditorQuestion,
+): { questionIndex: number; optionIndexes: number[] } | null {
+  if (!q.showIf) return null;
+  const questionIndex = draft.questions.findIndex((x) => x.key === q.showIf!.questionKey);
+  const target = draft.questions[questionIndex];
+  if (!target) return { questionIndex: draft.questions.length, optionIndexes: [] };
+  const optionIndexes = q.showIf.optionKeys
+    .map((k) => target.options.findIndex((o) => o.key === k))
+    .filter((i) => i >= 0);
+  return { questionIndex, optionIndexes };
 }
 
 export function toPayload(draft: EditorDraft, revision: number): SaveDraftPayload {
@@ -245,8 +305,14 @@ export function toPayload(draft: EditorDraft, revision: number): SaveDraftPayloa
       description: q.description.trim() ? q.description.trim() : null,
       required: q.required,
       settings: settingsPayload(q.type, q.settings),
+      ...(q.showIf ? { showIf: showIfPayload(draft, q) } : {}),
+      ...(q.semanticKey ? { semanticKey: q.semanticKey } : {}),
       options: isChoiceType(q.type)
-        ? q.options.map((o) => ({ ...(o.id ? { id: o.id } : {}), label: o.label.trim() }))
+        ? q.options.map((o) => ({
+            ...(o.id ? { id: o.id } : {}),
+            label: o.label.trim(),
+            ...(o.semanticKey ? { semanticKey: o.semanticKey } : {}),
+          }))
         : [],
     })),
   };
@@ -431,6 +497,18 @@ export function validateDraft(draft: EditorDraft): DraftErrors {
       default:
         break;
     }
+    if (q.showIf) {
+      const ti = draft.questions.findIndex((x) => x.key === q.showIf!.questionKey);
+      const target = draft.questions[ti];
+      if (!target)
+        e[`${p}.showIf`] = 'السؤال المرتبط بالشرط لم يعد موجودًا. اختر سؤالًا آخر أو احذف الشرط.';
+      else if (ti >= i) e[`${p}.showIf`] = 'الشرط يجب أن يعتمد على سؤال سابق لهذا السؤال.';
+      else if (!isChoiceType(target.type)) {
+        e[`${p}.showIf`] = 'الشرط يجب أن يعتمد على سؤال اختيار (اختيار واحد أو متعدد أو قائمة).';
+      } else if (!q.showIf.optionKeys.some((k) => target.options.some((o) => o.key === k))) {
+        e[`${p}.showIf`] = 'اختر خيارًا واحدًا على الأقل يُظهر هذا السؤال.';
+      }
+    }
     if (isChoiceType(q.type)) {
       if (q.options.length < L.minOptions)
         e[`${p}.options`] = `أضف ${L.minOptions} خيارات على الأقل.`;
@@ -518,6 +596,7 @@ export function toRenderQuestions(draft: EditorDraft): RenderQuestion[] {
             .filter((o) => o.label.trim() !== '')
             .map((o) => ({ key: o.key, label: o.label.trim() }))
         : [],
+      showIf: q.showIf,
     };
   });
 }

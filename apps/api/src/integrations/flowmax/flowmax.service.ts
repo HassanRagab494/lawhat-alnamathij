@@ -9,11 +9,14 @@ import { MIME_BY_KIND } from '../../files/file-kind';
 import type { FileStorage } from '../../files/storage';
 import { FILE_STORAGE } from '../../files/uploads.service';
 import { runFormTransaction } from '../../forms/form-transaction';
+import { versionConditions, visibleQuestionIds } from '../../forms/questions/visibility';
+import { isTemplateForm } from '../../forms/templates/real-estate';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FlowmaxClient, FlowmaxError } from './client';
 import { type AnswerInput, type Problem, type ShareInfo } from './mapping';
 import { buildAutoRequest } from './auto-property';
 import { incompatibleMedia, type IncompatibleMedia, type MediaItem } from './media';
+import { buildTemplateRequest } from './template-property';
 
 export const FLOWMAX_CLIENT = Symbol('FLOWMAX_CLIENT');
 
@@ -160,7 +163,18 @@ export class FlowmaxService implements OnModuleInit {
         submittedAt: true,
         version: {
           select: {
-            questions: { select: { id: true, logicalId: true, title: true, type: true } },
+            questions: {
+              orderBy: { position: 'asc' },
+              select: {
+                id: true,
+                logicalId: true,
+                title: true,
+                type: true,
+                semanticKey: true,
+                showIf: true,
+                options: { select: { id: true, logicalId: true } },
+              },
+            },
           },
         },
         answers: {
@@ -169,7 +183,12 @@ export class FlowmaxService implements OnModuleInit {
             textValue: true,
             numberValue: true,
             dateValue: true,
-            options: { select: { option: { select: { label: true, position: true } } } },
+            options: {
+              select: {
+                optionId: true,
+                option: { select: { label: true, position: true, semanticKey: true } },
+              },
+            },
             files: {
               orderBy: { createdAt: 'asc' },
               select: { id: true, originalName: true, kind: true, sizeBytes: true },
@@ -180,19 +199,26 @@ export class FlowmaxService implements OnModuleInit {
     });
     if (!r) throw Errors.notFound('الرد غير موجود.');
     const byQuestion = new Map(r.answers.map((a) => [a.questionId, a]));
+    // أسئلة الفرع غير النشط لا تُرسل حتى لو وُجدت لها بيانات (الخادم يرفضها عند الإرسال أصلًا)
+    const conditions = versionConditions(r.version.questions);
+    const visible = visibleQuestionIds(
+      r.version.questions.map((q) => ({ id: q.id, showIf: conditions.get(q.id) ?? null })),
+      new Map(r.answers.map((a) => [a.questionId, a.options.map((o) => o.optionId)])),
+    );
     const answers: AnswerInput[] = r.version.questions.map((q) => {
       const a = byQuestion.get(q.id);
+      const picked = a?.options.slice().sort((x, y) => x.option.position - y.option.position);
       return {
+        semanticKey: q.semanticKey,
+        hidden: !visible.has(q.id),
+        choiceKeys: picked?.flatMap((o) => (o.option.semanticKey ? [o.option.semanticKey] : [])),
         logicalId: q.logicalId,
         title: q.title,
         type: q.type,
         text: a?.textValue ?? null,
         number: a?.numberValue != null ? a.numberValue.toFixed() : null,
         date: a?.dateValue ? a.dateValue.toISOString().slice(0, 10) : null,
-        choices: a?.options
-          .slice()
-          .sort((x, y) => x.option.position - y.option.position)
-          .map((o) => o.option.label),
+        choices: picked?.map((o) => o.option.label),
         files: a?.files.map((f) => ({
           id: f.id,
           name: f.originalName,
@@ -207,13 +233,19 @@ export class FlowmaxService implements OnModuleInit {
   private async build(formId: string, responseId: string) {
     if (!this.integrationEnabled) return null;
     const { response, answers } = await this.responseAnswers(formId, responseId);
-    // تعرّف تلقائي على بيانات العقار من عناوين الأسئلة؛ لا إعداد يدوي
-    const built = buildAutoRequest(answers, {
+    const ctx = {
       referenceCode: response.referenceCode,
       submittedAt: response.submittedAt,
       approvedAt: new Date(),
       developerId: this.env.FLOWMAX_DEVELOPER_ID,
-    });
+    };
+    // نماذج القالب: ربط بالهويات الدلالية. غيرها: تعرّف تلقائي من عناوين الأسئلة الظاهرة (توافق).
+    const built = isTemplateForm(answers.map((a) => a.semanticKey))
+      ? buildTemplateRequest(answers, ctx)
+      : buildAutoRequest(
+          answers.filter((a) => !a.hidden),
+          ctx,
+        );
     return { built, incompatible: incompatibleMedia(built.media) };
   }
 

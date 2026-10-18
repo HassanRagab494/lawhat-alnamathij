@@ -17,9 +17,28 @@ const SETTINGS_DOC = [
   `FILE_UPLOAD: { allowedTypes (مطلوب: ${FILE_TYPE_KEYS.join(', ')}), maxFileSizeMb (مطلوب، 1-${QUESTION_LIMITS.fileMaxSizeMb}، وحتى ${QUESTION_LIMITS.videoMaxSizeMb} إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-${QUESTION_LIMITS.fileMaxCount}) }`,
 ].join('\n');
 
+const SEMANTIC_DOC =
+  'هوية دلالية ثابتة يضعها القالب (مثل offer.price أو apartment) لربط الحقل بـ Flowmax؛ تبقى عند تغيير الصياغة.';
+
 export class QuestionOptionDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ maxLength: QUESTION_LIMITS.optionLabelMax }) label!: string;
+  @ApiProperty({ type: String, nullable: true, description: SEMANTIC_DOC })
+  semanticKey!: string | null;
+}
+
+export class ShowIfDto {
+  @ApiProperty({ format: 'uuid', description: 'معرّف سؤال اختيار سابق في المسودة' })
+  questionId!: string;
+  @ApiProperty({ type: [String], description: 'يظهر السؤال إن اختير أحد هذه الخيارات' })
+  optionIds!: string[];
+}
+
+export class SaveShowIfDto {
+  @ApiProperty({ minimum: 0, description: 'موقع سؤال اختيار سابق في القائمة المرسلة نفسها' })
+  questionIndex!: number;
+  @ApiProperty({ type: [Number], description: 'مواقع خيارات ذلك السؤال التي تُظهر هذا السؤال' })
+  optionIndexes!: number[];
 }
 
 export class QuestionDto {
@@ -30,6 +49,14 @@ export class QuestionDto {
   @ApiProperty() required!: boolean;
   @ApiProperty({ type: 'object', additionalProperties: true, description: SETTINGS_DOC })
   settings!: Record<string, unknown>;
+  @ApiProperty({
+    type: ShowIfDto,
+    nullable: true,
+    description: 'شرط الظهور؛ null = ظاهر دائمًا',
+  })
+  showIf!: ShowIfDto | null;
+  @ApiProperty({ type: String, nullable: true, description: SEMANTIC_DOC })
+  semanticKey!: string | null;
   @ApiProperty({ type: [QuestionOptionDto], description: 'لأنواع الاختيار فقط؛ فارغة لغيرها' })
   options!: QuestionOptionDto[];
 }
@@ -45,6 +72,8 @@ export class SaveOptionDto {
   })
   id?: string;
   @ApiProperty({ maxLength: QUESTION_LIMITS.optionLabelMax }) label!: string;
+  @ApiPropertyOptional({ type: String, nullable: true, description: SEMANTIC_DOC })
+  semanticKey?: string | null;
 }
 
 export class SaveQuestionDto {
@@ -64,6 +93,15 @@ export class SaveQuestionDto {
   @ApiProperty() required!: boolean;
   @ApiProperty({ type: 'object', additionalProperties: true, description: SETTINGS_DOC })
   settings!: Record<string, unknown>;
+  @ApiPropertyOptional({
+    type: SaveShowIfDto,
+    nullable: true,
+    description:
+      'شرط الظهور بالمواقع: سؤال اختيار سابق وخياراته. يُرفض الإشارة إلى سؤال لاحق أو غير اختياري أو خيار غير موجود.',
+  })
+  showIf?: SaveShowIfDto | null;
+  @ApiPropertyOptional({ type: String, nullable: true, description: SEMANTIC_DOC })
+  semanticKey?: string | null;
   @ApiPropertyOptional({ type: [SaveOptionDto], maxItems: QUESTION_LIMITS.maxOptions })
   options?: SaveOptionDto[];
 }

@@ -562,6 +562,7 @@ describe('المرحلة الثانية: محرر النموذج', () => {
     expect(second.body.questions[0].options[0]).toEqual({
       id: first.body.questions[0].options[0].id,
       label: 'خيار معدّل',
+      semanticKey: null,
     });
     expect(
       await prisma.formDraftQuestionOption.count({

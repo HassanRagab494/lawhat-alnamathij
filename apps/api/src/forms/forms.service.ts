@@ -14,7 +14,10 @@ import type {
   FormPublicationDto,
   UpdateFormDto,
 } from './dto';
+import { applyConditions, applyQuestions } from './draft-apply';
 import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
+import { parseSaveDraft } from './questions/draft-schema';
+import { REAL_ESTATE_TEMPLATE, realEstateTemplateQuestions } from './templates/real-estate';
 
 /** آخر إصدار منشور فقط (لحالة النشر)؛ الإصدارات كاملة لا تُحمَّل هنا. */
 export const latestVersionInclude = {
@@ -121,13 +124,23 @@ export class FormsService {
         },
         include: formInclude,
       });
+      if (dto.template === REAL_ESTATE_TEMPLATE) {
+        // محتوى القالب يمر بمخطط حفظ المسودة نفسه، ثم يُطبق بالدوال نفسها (أسئلة ثم شروط).
+        const questions = parseSaveDraft({
+          revision: 1,
+          title: dto.title,
+          questions: realEstateTemplateQuestions(),
+        }).questions;
+        await applyQuestions(tx, created.draft!.id, [], questions);
+        await applyConditions(tx, created.draft!.id, questions, false);
+      }
       await this.audit.record(
         {
           actorId: actor.userId,
           action: 'form.created',
           entityType: 'form',
           entityId: created.id,
-          details: { title: dto.title },
+          details: { title: dto.title, ...(dto.template ? { template: dto.template } : {}) },
           ipAddress: meta.ipAddress,
         },
         tx,

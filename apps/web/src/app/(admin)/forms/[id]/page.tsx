@@ -24,6 +24,8 @@ import { api, ApiError, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
   changeQuestionType,
+  clearConditionsOn,
+  dependentsOf,
   fromServer,
   moveItem,
   newQuestion,
@@ -45,6 +47,7 @@ import {
   QUESTION_LIMITS,
   QUESTION_TYPES,
   QUESTION_TYPE_LABELS,
+  isChoiceType,
   type QuestionType,
 } from '@/lib/question-limits';
 import type { FormItem } from '@/lib/types';
@@ -198,8 +201,18 @@ function FormDetails() {
   function requestTypeChange(index: number, type: QuestionType) {
     const q = editor!.questions[index]!;
     const { question, losesData } = changeQuestionType(q, type);
-    if (losesData) setPendingType({ index, type });
+    // تحويل سؤال تعتمد عليه شروط إلى نوع غير اختياري يلغي تلك الشروط، فيلزم التأكيد.
+    const breaksConditions = !isChoiceType(type) && dependentsOf(editor!, q.key).length > 0;
+    if (losesData || breaksConditions) setPendingType({ index, type });
     else setQuestion(index, question);
+  }
+
+  /** وصف أثر حذف سؤال أو تغيير نوعه على الأسئلة المشروطة به. */
+  function dependentsNote(key: string | undefined): string {
+    const deps = key ? dependentsOf(editor!, key) : [];
+    if (!deps.length) return '';
+    const names = deps.map((d) => `«${d.title.trim() || 'سؤال بلا عنوان'}»`).join('، ');
+    return ` تعتمد عليه شروط ظهور ${deps.length === 1 ? 'سؤال' : `${deps.length} أسئلة`} (${names})؛ ستُزال هذه الشروط فتصبح ظاهرة دائمًا.`;
   }
 
   function addQuestion() {
@@ -413,6 +426,7 @@ function FormDetails() {
                     question={q}
                     index={i}
                     total={editor.questions.length}
+                    earlier={editor.questions.slice(0, i)}
                     errors={errorsForQuestion(errors, i)}
                     onChange={(next) => setQuestion(i, next)}
                     onTypeChange={(type) => requestTypeChange(i, type)}
@@ -533,13 +547,20 @@ function FormDetails() {
             title="حذف السؤال"
             description={
               pendingDelete !== null &&
-              `سيُحذف «${editor.questions[pendingDelete]?.title.trim() || `السؤال ${pendingDelete + 1}`}» مع خياراته وإعداداته. يُطبق الحذف عند «حفظ التغييرات».`
+              `سيُحذف «${editor.questions[pendingDelete]?.title.trim() || `السؤال ${pendingDelete + 1}`}» مع خياراته وإعداداته.${dependentsNote(editor.questions[pendingDelete]?.key)} يُطبق الحذف عند «حفظ التغييرات».`
             }
             confirmLabel="حذف السؤال"
             tone="danger"
             onConfirm={() => {
               const i = pendingDelete!;
-              updateEditor((d) => ({ ...d, questions: d.questions.filter((_, idx) => idx !== i) }));
+              const key = editor.questions[i]!.key;
+              updateEditor((d) => ({
+                ...d,
+                questions: clearConditionsOn(
+                  d.questions.filter((_, idx) => idx !== i),
+                  key,
+                ),
+              }));
               setErrors({});
               setPendingDelete(null);
             }}
@@ -550,13 +571,23 @@ function FormDetails() {
             title="تغيير نوع السؤال"
             description={
               pendingType &&
-              `سيصبح السؤال ${pendingType.index + 1} «${QUESTION_TYPE_LABELS[pendingType.type]}». سيبقى العنوان والوصف وحالة الإلزام، لكن ستُحذف الخيارات أو الإعدادات التي لا تناسب النوع الجديد.`
+              `سيصبح السؤال ${pendingType.index + 1} «${QUESTION_TYPE_LABELS[pendingType.type]}». سيبقى العنوان والوصف وحالة الإلزام، لكن ستُحذف الخيارات أو الإعدادات التي لا تناسب النوع الجديد.${isChoiceType(pendingType.type) ? '' : dependentsNote(editor.questions[pendingType.index]?.key)}`
             }
             confirmLabel="تغيير النوع"
             tone="danger"
             onConfirm={() => {
               const { index, type } = pendingType!;
-              setQuestion(index, changeQuestionType(editor.questions[index]!, type).question);
+              const current = editor.questions[index]!;
+              const changed = changeQuestionType(current, type).question;
+              updateEditor((d) => {
+                const questions = d.questions.map((x, idx) => (idx === index ? changed : x));
+                return {
+                  ...d,
+                  questions: isChoiceType(type)
+                    ? questions
+                    : clearConditionsOn(questions, current.key),
+                };
+              });
               setPendingType(null);
             }}
             onClose={() => setPendingType(null)}

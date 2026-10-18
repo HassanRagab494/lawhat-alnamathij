@@ -7,7 +7,7 @@ import type { RequestMeta } from '../auth/decorators';
 import { Errors } from '../common/errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadsService } from '../files/uploads.service';
-import { DraftService } from './draft.service';
+import { DraftService, storedShowIfIndexes } from './draft.service';
 import type { FormDto } from './dto';
 import { RevisionConflict, lockForm, runFormTransaction } from './form-transaction';
 import { FormsService } from './forms.service';
@@ -54,18 +54,28 @@ export function publishBlockers(draft: DraftForPublish, uploadsEnabled = false):
     }
   });
   // إعادة التحقق من المحتوى المحفوظ بالمخطط نفسه الذي يطبقه الحفظ (حماية من بيانات قديمة أو معدلة يدويًا).
+  const conditions = storedShowIfIndexes(draft.questions);
+  draft.questions.forEach((q, i) => {
+    if (q.showIf && !conditions[i]) {
+      reasons.push(
+        `شرط ظهور السؤال ${i + 1} «${q.title}» يشير إلى سؤال أو خيار محذوف. افتح المحرر وعدّل الشرط ثم احفظ.`,
+      );
+    }
+  });
   const check = saveDraftSchema.safeParse({
     revision: draft.revision,
     title: draft.title,
     description: draft.description,
-    questions: draft.questions.map((q) => ({
+    questions: draft.questions.map((q, i) => ({
       id: q.id,
       type: q.type,
       title: q.title,
       description: q.description,
       required: q.required,
       settings: q.settings,
-      options: q.options.map((o) => ({ id: o.id, label: o.label })),
+      showIf: conditions[i] ?? null,
+      semanticKey: q.semanticKey,
+      options: q.options.map((o) => ({ id: o.id, label: o.label, semanticKey: o.semanticKey })),
     })),
   });
   if (!check.success) {
@@ -170,11 +180,15 @@ export class PublishService {
                   description: q.description,
                   required: q.required,
                   settings: q.settings as Prisma.InputJsonValue,
+                  // معرّفات الشرط معرّفات مسودة، وهي نفسها logicalId في الإصدار.
+                  showIf: q.showIf ?? Prisma.DbNull,
+                  semanticKey: q.semanticKey,
                   options: {
                     create: q.options.map((o) => ({
                       logicalId: o.id,
                       position: o.position,
                       label: o.label,
+                      semanticKey: o.semanticKey,
                     })),
                   },
                 })),

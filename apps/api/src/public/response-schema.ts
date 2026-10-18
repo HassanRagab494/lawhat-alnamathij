@@ -6,6 +6,7 @@ import {
   QUESTION_LIMITS as L,
   type QuestionTypeKey,
 } from '../forms/questions/limits';
+import { visibleQuestionIds, type ShowIf } from '../forms/questions/visibility';
 
 /**
  * التحقق من الردود العامة. البنية يتحقق منها zod؛ المعنى (الأسئلة والخيارات والقيود)
@@ -87,6 +88,8 @@ export interface VersionQuestionForValidation {
   required: boolean;
   settings: Record<string, unknown>;
   options: { id: string }[];
+  /** شرط الظهور بمعرّفات هذا الإصدار؛ null = ظاهر دائمًا. */
+  showIf?: ShowIf | null;
 }
 
 /** إجابة جاهزة للحفظ: عمود واحد حسب النوع. */
@@ -145,6 +148,22 @@ export function validateAgainstVersion(
     }
   });
 
+  // الظهور يُحسب من الخيارات المرسلة الصالحة فقط، بالترتيب، فلا يُظهر خيار مزيف سؤالًا مخفيًا.
+  const selected = new Map<string, string[]>();
+  for (const q of questions) {
+    const raw = provided.get(q.id);
+    if (raw === undefined || q.options.length === 0) continue;
+    const ids = (Array.isArray(raw) ? raw : [raw]).map((v) => v.trim().toLowerCase());
+    selected.set(
+      q.id,
+      ids.filter((id) => q.options.some((o) => o.id === id)),
+    );
+  }
+  const visible = visibleQuestionIds(
+    questions.map((q) => ({ id: q.id, showIf: q.showIf ?? null })),
+    selected,
+  );
+
   const out: NormalizedAnswer[] = [];
   for (const q of questions) {
     const field = `answers.${q.id}`;
@@ -153,6 +172,11 @@ export function validateAgainstVersion(
     const s = q.settings ?? {};
 
     const empty = raw === undefined || (Array.isArray(raw) ? raw.length === 0 : raw.trim() === '');
+    if (!visible.has(q.id)) {
+      // سؤال فرع غير نشط: ليس إجباريًا، ولا تُقبل له إجابة أو ملفات حتى لو أُرسلت يدويًا.
+      if (!empty) fail('هذا السؤال غير ظاهر حسب إجاباتك، فلا تُقبل له إجابة.');
+      continue;
+    }
     if (empty) {
       if (q.required) fail('هذا السؤال إجباري.');
       continue;

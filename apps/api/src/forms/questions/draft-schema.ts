@@ -155,9 +155,36 @@ const fileSettings = z
     }
   });
 
+/** هوية دلالية ثابتة (مثل offer.price أو apartment)؛ يضعها القالب ولا تتغير بتغيير الصياغة. */
+export const SEMANTIC_KEY_PATTERN = /^[a-z][a-z0-9_.]{0,63}$/;
+const semanticKey = z
+  .string()
+  .regex(SEMANTIC_KEY_PATTERN, 'الهوية الدلالية غير صالحة.')
+  .nullable()
+  .optional()
+  .transform((v) => v ?? null);
+
+/**
+ * شرط الظهور بالمواقع في القائمة المرسلة نفسها (لأن الأسئلة والخيارات الجديدة بلا معرّفات بعد).
+ * الخادم يحوّله إلى معرّفات ثابتة عند الحفظ.
+ */
+const showIf = z
+  .object({
+    questionIndex: int(0, L.maxQuestions - 1),
+    optionIndexes: z
+      .array(int(0, L.maxOptions - 1))
+      .min(1, 'اختر خيارًا واحدًا على الأقل يُظهر هذا السؤال.')
+      .max(L.maxOptions, `الحد الأقصى ${L.maxOptions} خيارًا.`),
+  })
+  .strict()
+  .nullable()
+  .optional()
+  .transform((v) => v ?? null);
+
 const option = z
   .object({
     id: id.optional(),
+    semanticKey,
     label: z
       .string()
       .trim()
@@ -182,6 +209,8 @@ const base = {
     .max(L.questionTitleMax, `عنوان السؤال يجب ألا يزيد عن ${L.questionTitleMax} حرف.`),
   description: optionalNullableText(L.questionDescriptionMax, 'الوصف المساعد'),
   required: z.boolean({ required_error: 'حدد إن كان السؤال إجباريًا.' }),
+  showIf,
+  semanticKey,
 };
 
 const question = z.discriminatedUnion(
@@ -262,7 +291,19 @@ export const saveDraftSchema = z
   .superRefine((draft, ctx) => {
     const questionIds = new Set<string>();
     const optionIds = new Set<string>();
+    const semanticKeys = new Set<string>();
     draft.questions.forEach((q, qi) => {
+      if (q.semanticKey) {
+        if (semanticKeys.has(q.semanticKey)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['questions', qi, 'semanticKey'],
+            message: 'الهوية الدلالية مكررة في النموذج.',
+          });
+        }
+        semanticKeys.add(q.semanticKey);
+      }
+      checkShowIf(draft.questions, qi, ctx);
       if (q.id) {
         if (questionIds.has(q.id)) {
           ctx.addIssue({
@@ -274,8 +315,19 @@ export const saveDraftSchema = z
         questionIds.add(q.id);
       }
       const labels = new Set<string>();
+      const optionKeys = new Set<string>();
       q.options.forEach((o, oi) => {
-        const opt = o as { id?: string; label: string };
+        const opt = o as OptionInput;
+        if (opt.semanticKey) {
+          if (optionKeys.has(opt.semanticKey)) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['questions', qi, 'options', oi, 'semanticKey'],
+              message: 'الهوية الدلالية للخيار مكررة.',
+            });
+          }
+          optionKeys.add(opt.semanticKey);
+        }
         if (opt.id) {
           if (optionIds.has(opt.id)) {
             ctx.addIssue({
@@ -313,7 +365,38 @@ export const saveDraftSchema = z
 
 export type SaveDraftInput = z.output<typeof saveDraftSchema>;
 export type QuestionInput = SaveDraftInput['questions'][number];
-export type OptionInput = { id?: string; label: string };
+export type OptionInput = { id?: string; label: string; semanticKey?: string | null };
+export type ShowIfInput = NonNullable<QuestionInput['showIf']>;
+
+/**
+ * يرفض الشروط غير الصحيحة: الإشارة إلى سؤال لاحق أو إلى السؤال نفسه (تمنع الدورات)،
+ * أو إلى سؤال ليس من أنواع الاختيار، أو إلى خيارات غير موجودة أو مكررة.
+ */
+function checkShowIf(
+  questions: { type: string; options: unknown[]; showIf?: ShowIfInput | null }[],
+  qi: number,
+  ctx: z.RefinementCtx,
+): void {
+  const cond = questions[qi]!.showIf;
+  if (!cond) return;
+  const path = ['questions', qi, 'showIf'];
+  const issue = (message: string, extra: (string | number)[] = []) =>
+    ctx.addIssue({ code: 'custom', path: [...path, ...extra], message });
+  if (cond.questionIndex >= qi) {
+    issue('الشرط يجب أن يعتمد على سؤال سابق لهذا السؤال.', ['questionIndex']);
+    return;
+  }
+  const target = questions[cond.questionIndex]!;
+  if (!CHOICE_TYPES.includes(target.type as QuestionTypeKey)) {
+    issue('الشرط يجب أن يعتمد على سؤال اختيار (اختيار واحد أو متعدد أو قائمة).', ['questionIndex']);
+    return;
+  }
+  if (new Set(cond.optionIndexes).size !== cond.optionIndexes.length) {
+    issue('تكرر الخيار نفسه في الشرط.', ['optionIndexes']);
+  } else if (cond.optionIndexes.some((i) => i >= target.options.length)) {
+    issue('أحد خيارات الشرط غير موجود في السؤال المرتبط.', ['optionIndexes']);
+  }
+}
 
 const errorMap: z.ZodErrorMap = (issue, ctx) => {
   switch (issue.code) {

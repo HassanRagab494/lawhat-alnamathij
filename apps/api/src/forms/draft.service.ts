@@ -13,8 +13,11 @@ import {
   type OptionInput,
   type QuestionInput,
   type SaveDraftInput,
+  type ShowIfInput,
 } from './questions/draft-schema';
 import type { QuestionTypeKey } from './questions/limits';
+import { readShowIf } from './questions/visibility';
+import { applyConditions, applyQuestions } from './draft-apply';
 
 const draftInclude = {
   createdBy: { select: { id: true, displayName: true } },
@@ -56,8 +59,30 @@ function questionToDto(q: StoredQuestion): QuestionDto {
     description: q.description,
     required: q.required,
     settings: (q.settings ?? {}) as Record<string, unknown>,
-    options: q.options.map((o) => ({ id: o.id, label: o.label })),
+    showIf: readShowIf(q.showIf),
+    semanticKey: q.semanticKey,
+    options: q.options.map((o) => ({ id: o.id, label: o.label, semanticKey: o.semanticKey })),
   };
+}
+
+/**
+ * يحوّل شروط الأسئلة المخزّنة (بالمعرّفات) إلى مواقع في القائمة المرتبة نفسها، كما يرسلها المحرر.
+ * الشرط الذي يشير إلى سؤال أو خيارات لم تعد موجودة يُعامل كأنه غير موجود.
+ */
+export function storedShowIfIndexes(
+  questions: { id: string; showIf: unknown; options: { id: string }[] }[],
+): (ShowIfInput | null)[] {
+  const position = new Map(questions.map((q, i) => [q.id, i]));
+  return questions.map((q) => {
+    const cond = readShowIf(q.showIf);
+    const qi = cond ? position.get(cond.questionId) : undefined;
+    if (!cond || qi === undefined) return null;
+    const target = questions[qi]!;
+    const optionIndexes = cond.optionIds
+      .map((id) => target.options.findIndex((o) => o.id === id))
+      .filter((i) => i >= 0);
+    return optionIndexes.length ? { questionIndex: qi, optionIndexes } : null;
+  });
 }
 
 export function toDraftDto(form: FormWithFullDraft): FormDraftDto {
@@ -76,6 +101,8 @@ function contentKey(
     description: string | null;
     required: boolean;
     settings: unknown;
+    showIf: ShowIfInput | null;
+    semanticKey: string | null;
     options: OptionInput[];
   }[],
 ): string {
@@ -90,7 +117,13 @@ function contentKey(
         description: q.description,
         required: q.required,
         settings: q.settings,
-        options: q.options.map((o) => ({ id: o.id ?? null, label: o.label })),
+        showIf: q.showIf ?? null,
+        semanticKey: q.semanticKey ?? null,
+        options: q.options.map((o) => ({
+          id: o.id ?? null,
+          label: o.label,
+          semanticKey: o.semanticKey ?? null,
+        })),
       })),
     }),
   );
@@ -141,10 +174,15 @@ export class DraftService {
           if (draft.revision !== input.revision) throw new RevisionConflict();
           assertOwnership(draft.questions, input.questions);
 
+          const storedConditions = storedShowIfIndexes(draft.questions);
           const storedKey = contentKey(
             draft.title,
             draft.description,
-            draft.questions.map((q) => ({ ...q, options: q.options })),
+            draft.questions.map((q, i) => ({
+              ...q,
+              showIf: storedConditions[i] ?? null,
+              options: q.options,
+            })),
           );
           const incomingKey = contentKey(
             input.title,
@@ -154,6 +192,12 @@ export class DraftService {
           if (storedKey === incomingKey) return current; // لا تغيير: لا زيادة في revision.
 
           const summary = await applyQuestions(tx, draft.id, draft.questions, input.questions);
+          await applyConditions(
+            tx,
+            draft.id,
+            input.questions,
+            draft.questions.some((q) => q.showIf),
+          );
 
           const bumped = await tx.formDraft.updateMany({
             where: { id: draft.id, revision: input.revision },
@@ -224,86 +268,6 @@ function assertOwnership(stored: StoredQuestion[], incoming: QuestionInput[]): v
     });
   });
   if (errors.length) throw Errors.validation(errors);
-}
-
-/** يطبق فروق الأسئلة والخيارات فقط (حذف الغائب، تحديث المتغير، إنشاء الجديد) مع ترتيب position من ترتيب القائمة. */
-async function applyQuestions(
-  tx: Prisma.TransactionClient,
-  draftId: string,
-  stored: StoredQuestion[],
-  incoming: QuestionInput[],
-): Promise<{ added: number; removed: number; updated: number }> {
-  const storedById = new Map(stored.map((q) => [q.id, q]));
-  const keepIds = incoming.flatMap((q) => (q.id ? [q.id] : []));
-  const removed = await tx.formDraftQuestion.deleteMany({
-    where: { draftId, id: { notIn: keepIds } },
-  });
-
-  let added = 0;
-  let updated = 0;
-  for (const [position, q] of incoming.entries()) {
-    const options = q.options as OptionInput[];
-    const fields = {
-      position,
-      type: q.type,
-      title: q.title,
-      description: q.description,
-      required: q.required,
-      settings: q.settings as Prisma.InputJsonValue,
-    };
-
-    if (!q.id) {
-      const created = await tx.formDraftQuestion.create({
-        data: { ...fields, draftId },
-        select: { id: true },
-      });
-      if (options.length) {
-        await tx.formDraftQuestionOption.createMany({
-          data: options.map((o, i) => ({ questionId: created.id, position: i, label: o.label })),
-        });
-      }
-      added++;
-      continue;
-    }
-
-    const before = storedById.get(q.id)!;
-    let changed =
-      before.position !== position ||
-      before.type !== q.type ||
-      before.title !== q.title ||
-      before.description !== q.description ||
-      before.required !== q.required ||
-      JSON.stringify(sortKeys(before.settings)) !== JSON.stringify(sortKeys(q.settings));
-    if (changed) await tx.formDraftQuestion.update({ where: { id: q.id }, data: fields });
-
-    const keepOptionIds = options.flatMap((o) => (o.id ? [o.id] : []));
-    const removedOptions = await tx.formDraftQuestionOption.deleteMany({
-      where: { questionId: q.id, id: { notIn: keepOptionIds } },
-    });
-    if (removedOptions.count) changed = true;
-    const beforeOptions = new Map(before.options.map((o) => [o.id, o]));
-    const newOptions: { questionId: string; position: number; label: string }[] = [];
-    for (const [i, o] of options.entries()) {
-      if (!o.id) {
-        newOptions.push({ questionId: q.id, position: i, label: o.label });
-        continue;
-      }
-      const prev = beforeOptions.get(o.id)!;
-      if (prev.position !== i || prev.label !== o.label) {
-        await tx.formDraftQuestionOption.update({
-          where: { id: o.id },
-          data: { position: i, label: o.label },
-        });
-        changed = true;
-      }
-    }
-    if (newOptions.length) {
-      await tx.formDraftQuestionOption.createMany({ data: newOptions });
-      changed = true;
-    }
-    if (changed) updated++;
-  }
-  return { added, removed: removed.count, updated };
 }
 
 export type { SaveDraftInput };

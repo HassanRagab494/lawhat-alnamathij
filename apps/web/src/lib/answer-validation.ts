@@ -25,9 +25,34 @@ export interface RenderQuestion {
     maxFiles?: number;
   };
   options: { key: string; label: string }[];
+  /** شرط الظهور: يظهر إن كانت إجابة سؤال الاختيار السابق أحد هذه الخيارات (بالمفاتيح). */
+  showIf?: { questionKey: string; optionKeys: string[] } | null;
 }
 
 export type AnswerValue = string | string[] | undefined;
+
+/**
+ * مفاتيح الأسئلة الظاهرة حسب الإجابات الحالية (مطابق لقاعدة الخادم): يظهر السؤال المشروط فقط
+ * إن كان سؤاله المرجعي ظاهرًا وإجابته أحد الخيارات المحددة. المخفي يخفي ما يعتمد عليه.
+ */
+export function visibleKeys(
+  questions: RenderQuestion[],
+  answers: Record<string, AnswerValue>,
+): Set<string> {
+  const visible = new Set<string>();
+  for (const q of questions) {
+    const cond = q.showIf;
+    if (!cond) {
+      visible.add(q.key);
+      continue;
+    }
+    if (!visible.has(cond.questionKey)) continue;
+    const value = answers[cond.questionKey];
+    const picked = Array.isArray(value) ? value : value ? [value] : [];
+    if (picked.some((k) => cond.optionKeys.includes(k))) visible.add(q.key);
+  }
+  return visible;
+}
 
 function isEmpty(v: AnswerValue): boolean {
   return v === undefined || (Array.isArray(v) ? v.length === 0 : v.trim() === '');
@@ -100,7 +125,10 @@ export function validateAnswers(
   answers: Record<string, AnswerValue>,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
+  const visible = visibleKeys(questions, answers);
   for (const q of questions) {
+    // السؤال المخفي ليس إجباريًا ولا يُتحقق من إجابته (ولا تُرسل).
+    if (!visible.has(q.key)) continue;
     const msg = validateAnswer(q, answers[q.key]);
     if (msg) errors[q.key] = msg;
   }

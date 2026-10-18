@@ -196,6 +196,10 @@ model FormDraftQuestion {
   description String?      @db.Text
   required    Boolean      @default(false)
   settings    Json
+  /// شرط الظهور: {questionId, optionIds} بمعرّفات منطقية لسؤال اختيار سابق؛ null = ظاهر دائمًا.
+  showIf      Json?        @map("show_if")
+  /// هوية دلالية ثابتة (مثل offer.price) تربط السؤال بحقل خارجي مهما تغيّرت صياغته.
+  semanticKey String?      @map("semantic_key") @db.VarChar(64)
   createdAt   DateTime     @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.DateTime(3)
 
@@ -208,12 +212,14 @@ model FormDraftQuestion {
 
 /// خيار لسؤال من أنواع الاختيار. المعرّف ثابت عبر الحفظ؛ الترتيب في position فقط.
 model FormDraftQuestionOption {
-  id         String   @id @default(uuid(7)) @db.Char(36)
-  questionId String   @map("question_id") @db.Char(36)
-  position   Int
-  label      String   @db.VarChar(200)
-  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+  id          String   @id @default(uuid(7)) @db.Char(36)
+  questionId  String   @map("question_id") @db.Char(36)
+  position    Int
+  label       String   @db.VarChar(200)
+  /// هوية دلالية ثابتة للخيار (مثل apartment).
+  semanticKey String?  @map("semantic_key") @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
 
   question FormDraftQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
@@ -277,6 +283,10 @@ model FormVersionQuestion {
   description String?      @db.Text
   required    Boolean
   settings    Json
+  /// شرط الظهور: {questionId, optionIds} بمعرّفات منطقية لسؤال اختيار سابق؛ null = ظاهر دائمًا.
+  showIf      Json?        @map("show_if")
+  /// هوية دلالية ثابتة (مثل offer.price) تربط السؤال بحقل خارجي مهما تغيّرت صياغته.
+  semanticKey String?      @map("semantic_key") @db.VarChar(64)
 
   version FormVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
   options FormVersionOption[]
@@ -290,11 +300,13 @@ model FormVersionQuestion {
 }
 
 model FormVersionOption {
-  id         String @id @default(uuid(7)) @db.Char(36)
-  questionId String @map("question_id") @db.Char(36)
-  logicalId  String @map("logical_id") @db.Char(36)
-  position   Int
-  label      String @db.VarChar(200)
+  id          String  @id @default(uuid(7)) @db.Char(36)
+  questionId  String  @map("question_id") @db.Char(36)
+  logicalId   String  @map("logical_id") @db.Char(36)
+  position    Int
+  label       String  @db.VarChar(200)
+  /// هوية دلالية ثابتة للخيار (مثل apartment).
+  semanticKey String? @map("semantic_key") @db.VarChar(64)
 
   question FormVersionQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
   selected FormAnswerOption[]

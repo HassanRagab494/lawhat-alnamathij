@@ -1,12 +1,28 @@
 'use client';
 
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { validateAnswers, type AnswerValue, type RenderQuestion } from '@/lib/answer-validation';
+import {
+  validateAnswers,
+  visibleKeys,
+  type AnswerValue,
+  type RenderQuestion,
+} from '@/lib/answer-validation';
 import { FILE_TYPE_LABELS } from '@/lib/question-limits';
 import { Alert, Button, EmptyState, SelectInput, TextArea, TextInput } from './ui';
 import { FileUploadControl, type UploadsController } from './file-upload-control';
 
 export type Answers = Record<string, AnswerValue>;
+
+/** أسئلة أُخفيت بتغيير إجابة سؤال اختيار وكانت لها إجابات (تبقى في الصفحة ولا تُرسل). */
+interface BranchNotice {
+  key: string;
+  titles: string[];
+  files: boolean;
+}
+
+function hasValue(v: AnswerValue): boolean {
+  return Array.isArray(v) ? v.length > 0 : typeof v === 'string' && v.trim() !== '';
+}
 
 /** وضع التعبئة العامة: الإجابات والأخطاء تديرها الصفحة، والإرسال الفعلي عبر onSubmit. */
 export interface PublicModeProps {
@@ -45,6 +61,7 @@ export function FormRenderer({
   const [localAnswers, setLocalAnswers] = useState<Answers>({});
   const [localErrors, setLocalErrors] = useState<Record<string, string>>({});
   const [checked, setChecked] = useState<'valid' | 'invalid' | null>(null);
+  const [branchNotice, setBranchNotice] = useState<BranchNotice | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const answers = publicMode ? publicMode.answers : localAnswers;
@@ -52,11 +69,27 @@ export function FormRenderer({
   const setAnswers = publicMode ? publicMode.onAnswersChange : setLocalAnswers;
   const setErrors = publicMode ? publicMode.onErrorsChange : setLocalErrors;
 
+  const visible = visibleKeys(questions, answers);
+
   function setAnswer(key: string, value: AnswerValue) {
-    setAnswers({ ...answers, [key]: value });
-    if (errors[key]) {
-      setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== key)));
+    const next = { ...answers, [key]: value };
+    const after = visibleKeys(questions, next);
+    // لا تُفقد البيانات بصمت: أسئلة الفرع السابق تبقى إجاباتها في الصفحة، مع تنبيه بأنها لن تُرسل.
+    const hidden = questions.filter(
+      (q) => visible.has(q.key) && !after.has(q.key) && hasValue(next[q.key]),
+    );
+    if (hidden.length) {
+      setBranchNotice({
+        key,
+        titles: hidden.map((q) => q.title),
+        files: hidden.some((q) => q.type === 'FILE_UPLOAD'),
+      });
+    } else if (branchNotice?.key === key) {
+      setBranchNotice(null);
     }
+    setAnswers(next);
+    const kept = Object.entries(errors).filter(([k]) => k !== key && after.has(k));
+    if (kept.length !== Object.keys(errors).length) setErrors(Object.fromEntries(kept));
     setChecked(null);
   }
 
@@ -123,16 +156,23 @@ export function FormRenderer({
           <EmptyState title="لا توجد أسئلة بعد" description="أضف أسئلة من المحرر لتظهر هنا." />
         </section>
       ) : (
-        questions.map((q) => (
-          <PreviewQuestion
-            key={q.key}
-            question={q}
-            value={answers[q.key]}
-            error={errors[q.key]}
-            uploads={publicMode?.uploads}
-            onChange={(v) => setAnswer(q.key, v)}
-          />
-        ))
+        questions
+          .filter((q) => visible.has(q.key))
+          .map((q) => (
+            <PreviewQuestion
+              key={q.key}
+              question={q}
+              value={answers[q.key]}
+              error={errors[q.key]}
+              uploads={publicMode?.uploads}
+              onChange={(v) => setAnswer(q.key, v)}
+              notice={
+                branchNotice?.key === q.key ? (
+                  <BranchNoticeAlert notice={branchNotice} />
+                ) : undefined
+              }
+            />
+          ))
       )}
 
       {questions.length > 0 && !publicMode && (
@@ -189,6 +229,22 @@ export function FormRenderer({
   );
 }
 
+function BranchNoticeAlert({ notice }: { notice: BranchNotice }) {
+  const count = notice.titles.length;
+  const what = count === 1 ? 'سؤال أجبت عنه' : `${count} أسئلة أجبت عنها`;
+  const list = notice.titles.map((t) => `«${t}»`).join('، ');
+  const files = notice.files
+    ? '، والملفات المرفوعة لها لا تُرفق بالرد وتُحذف تلقائيًا من الخادم لاحقًا'
+    : '';
+  return (
+    <div className="mt-3">
+      <Alert tone="warning" title="تغيّرت الأسئلة الظاهرة">
+        {`بهذا الاختيار أُخفي ${what}: ${list}. إجاباتها محفوظة في الصفحة لكنها لن تُرسل ما دامت مخفية${files}. ارجع للاختيار السابق لاستعادتها.`}
+      </Alert>
+    </div>
+  );
+}
+
 function constraintHint(q: RenderQuestion): string | null {
   const s = q.settings;
   const parts: string[] = [];
@@ -225,12 +281,14 @@ function PreviewQuestion({
   error,
   uploads,
   onChange,
+  notice,
 }: {
   question: RenderQuestion;
   uploads?: UploadsController;
   value: AnswerValue;
   error?: string;
   onChange: (v: AnswerValue) => void;
+  notice?: ReactNode;
 }) {
   const id = useId();
   const hint = constraintHint(q);
@@ -443,6 +501,7 @@ function PreviewQuestion({
           {error}
         </p>
       )}
+      {notice}
     </section>
   );
 }

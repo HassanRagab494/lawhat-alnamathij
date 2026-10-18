@@ -57,6 +57,8 @@ export interface AnswerView {
   title: string;
   description: string | null;
   required: boolean;
+  /** مخفي حسب إجابات هذا الرد (فرع غير نشط في سؤال شرطي). */
+  hidden?: boolean;
   kind: AnswerKind;
   value?: string;
   options?: { label: string; selected: boolean }[];

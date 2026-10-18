@@ -2429,6 +2429,13 @@
             "type": "object",
             "maxLength": 2000,
             "nullable": true
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "real-estate-unified"
+            ],
+            "description": "قالب جاهز اختياري. real-estate-unified: نموذج عقاري موحّد بأسئلة العرض والطلب وشروطها، مربوط بـ Flowmax بهويات دلالية."
           }
         },
         "required": [
@@ -2459,6 +2466,27 @@
           "revision"
         ]
       },
+      "ShowIfDto": {
+        "type": "object",
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "معرّف سؤال اختيار سابق في المسودة"
+          },
+          "optionIds": {
+            "description": "يظهر السؤال إن اختير أحد هذه الخيارات",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "questionId",
+          "optionIds"
+        ]
+      },
       "QuestionOptionDto": {
         "type": "object",
         "properties": {
@@ -2469,11 +2497,17 @@
           "label": {
             "type": "string",
             "maxLength": 200
+          },
+          "semanticKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "هوية دلالية ثابتة يضعها القالب (مثل offer.price أو apartment) لربط الحقل بـ Flowmax؛ تبقى عند تغيير الصياغة."
           }
         },
         "required": [
           "id",
-          "label"
+          "label",
+          "semanticKey"
         ]
       },
       "QuestionDto": {
@@ -2512,6 +2546,21 @@
             "additionalProperties": true,
             "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt, mp4, mov, webm), maxFileSizeMb (مطلوب، 1-25، وحتى 100 إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-10) }"
           },
+          "showIf": {
+            "nullable": true,
+            "description": "شرط الظهور؛ null = ظاهر دائمًا",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ShowIfDto"
+              }
+            ]
+          },
+          "semanticKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "هوية دلالية ثابتة يضعها القالب (مثل offer.price أو apartment) لربط الحقل بـ Flowmax؛ تبقى عند تغيير الصياغة."
+          },
           "options": {
             "description": "لأنواع الاختيار فقط؛ فارغة لغيرها",
             "type": "array",
@@ -2527,6 +2576,8 @@
           "description",
           "required",
           "settings",
+          "showIf",
+          "semanticKey",
           "options"
         ]
       },
@@ -2600,6 +2651,27 @@
           "questions"
         ]
       },
+      "SaveShowIfDto": {
+        "type": "object",
+        "properties": {
+          "questionIndex": {
+            "type": "number",
+            "minimum": 0,
+            "description": "موقع سؤال اختيار سابق في القائمة المرسلة نفسها"
+          },
+          "optionIndexes": {
+            "description": "مواقع خيارات ذلك السؤال التي تُظهر هذا السؤال",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "questionIndex",
+          "optionIndexes"
+        ]
+      },
       "SaveOptionDto": {
         "type": "object",
         "properties": {
@@ -2611,6 +2683,11 @@
           "label": {
             "type": "string",
             "maxLength": 200
+          },
+          "semanticKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "هوية دلالية ثابتة يضعها القالب (مثل offer.price أو apartment) لربط الحقل بـ Flowmax؛ تبقى عند تغيير الصياغة."
           }
         },
         "required": [
@@ -2654,6 +2731,21 @@
             "type": "object",
             "additionalProperties": true,
             "description": "إعدادات خاصة بالنوع (كل الحقول اختيارية ما لم يُذكر):\nSHORT_TEXT/PARAGRAPH: { minLength, maxLength } أعداد صحيحة حتى 500/10000\nSINGLE_CHOICE/DROPDOWN: {} ويتطلب options (2 على الأقل)\nMULTIPLE_CHOICE: { minSelections, maxSelections } لا تتجاوز عدد الخيارات، ويتطلب options\nNUMBER: { allowDecimals (مطلوب), min, max } بقيمة مطلقة حتى 1000000000000\nDATE: { minDate, maxDate } بصيغة YYYY-MM-DD بين 1900-01-01 و2100-12-31\nFILE_UPLOAD: { allowedTypes (مطلوب: pdf, jpg, png, webp, docx, xlsx, txt, mp4, mov, webm), maxFileSizeMb (مطلوب، 1-25، وحتى 100 إن سمح السؤال بالفيديو), maxFiles (مطلوب، 1-10) }"
+          },
+          "showIf": {
+            "nullable": true,
+            "description": "شرط الظهور بالمواقع: سؤال اختيار سابق وخياراته. يُرفض الإشارة إلى سؤال لاحق أو غير اختياري أو خيار غير موجود.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SaveShowIfDto"
+              }
+            ]
+          },
+          "semanticKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "هوية دلالية ثابتة يضعها القالب (مثل offer.price أو apartment) لربط الحقل بـ Flowmax؛ تبقى عند تغيير الصياغة."
           },
           "options": {
             "maxItems": 50,
@@ -2779,6 +2871,26 @@
           "label"
         ]
       },
+      "PublicShowIfDto": {
+        "type": "object",
+        "properties": {
+          "questionKey": {
+            "type": "string",
+            "description": "المفتاح المنطقي لسؤال الاختيار السابق"
+          },
+          "optionKeys": {
+            "description": "المفاتيح المنطقية للخيارات التي تُظهر السؤال",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "questionKey",
+          "optionKeys"
+        ]
+      },
       "PublicQuestionDto": {
         "type": "object",
         "properties": {
@@ -2822,6 +2934,16 @@
             "items": {
               "$ref": "#/components/schemas/PublicOptionDto"
             }
+          },
+          "showIf": {
+            "nullable": true,
+            "description": "شرط الظهور؛ null = ظاهر دائمًا. السؤال المخفي ليس إجباريًا، والخادم يرفض أي إجابة له.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PublicShowIfDto"
+              }
+            ]
           }
         },
         "required": [
@@ -2832,7 +2954,8 @@
           "description",
           "required",
           "settings",
-          "options"
+          "options",
+          "showIf"
         ]
       },
       "PublicFormDto": {
@@ -3124,6 +3247,10 @@
           "required": {
             "type": "boolean"
           },
+          "hidden": {
+            "type": "boolean",
+            "description": "true إن كان السؤال مخفيًا حسب إجابات هذا الرد (فرع غير نشط في سؤال شرطي)؛ لا إجابة له."
+          },
           "kind": {
             "type": "string",
             "enum": [
@@ -3160,6 +3287,7 @@
           "title",
           "description",
           "required",
+          "hidden",
           "kind"
         ]
       },

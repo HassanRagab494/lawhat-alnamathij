@@ -8,6 +8,7 @@ import { AppError, Errors } from '../common/errors';
 import { pageMeta } from '../common/pagination';
 import { runFormTransaction } from '../forms/form-transaction';
 import type { QuestionTypeKey } from '../forms/questions/limits';
+import { versionConditions, visibleQuestionIds } from '../forms/questions/visibility';
 import { NOT_SCANNED_ENGINE } from '../files/scanner';
 import { FILE_STORAGE } from '../files/uploads.service';
 import type { FileStorage } from '../files/storage';
@@ -71,6 +72,11 @@ function dateText(value: Date): string {
 
 export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
   const byQuestion = new Map(r.answers.map((a) => [a.questionId, a]));
+  const conditions = versionConditions(r.version.questions);
+  const visible = visibleQuestionIds(
+    r.version.questions.map((q) => ({ id: q.id, showIf: conditions.get(q.id) ?? null })),
+    new Map(r.answers.map((a) => [a.questionId, a.options.map((o) => o.optionId)])),
+  );
   const answers: AnswerViewDto[] = r.version.questions.map((q) => {
     const base = {
       questionId: q.id,
@@ -79,6 +85,7 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
       title: q.title,
       description: q.description,
       required: q.required,
+      hidden: !visible.has(q.id),
     };
     const a: AnswerRow | undefined = byQuestion.get(q.id);
     if (q.type === 'FILE_UPLOAD') {

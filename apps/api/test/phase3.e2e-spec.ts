@@ -402,8 +402,20 @@ describe('المرحلة الثالثة: النشر والاستقبال وال�
     );
     expect(res.body.questions).toHaveLength(7);
     expect(Object.keys(res.body.questions[2]).sort()).toEqual(
-      ['description', 'id', 'key', 'options', 'required', 'settings', 'title', 'type'].sort(),
+      [
+        'description',
+        'id',
+        'key',
+        'options',
+        'required',
+        'settings',
+        'showIf',
+        'title',
+        'type',
+      ].sort(),
     );
+    // نموذج بلا أسئلة شرطية: كل الأسئلة ظاهرة دائمًا
+    expect(res.body.questions.every((x: { showIf: unknown }) => x.showIf === null)).toBe(true);
     const text = JSON.stringify(res.body);
     for (const leak of [
       'revision',

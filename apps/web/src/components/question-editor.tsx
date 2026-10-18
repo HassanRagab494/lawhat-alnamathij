@@ -26,6 +26,7 @@ export function QuestionEditor({
   question: q,
   index,
   total,
+  earlier,
   errors,
   onChange,
   onTypeChange,
@@ -35,6 +36,8 @@ export function QuestionEditor({
   question: EditorQuestion;
   index: number;
   total: number;
+  /** الأسئلة التي قبل هذا السؤال (للشرط: أسئلة الاختيار منها فقط). */
+  earlier: EditorQuestion[];
   errors: QuestionErrors;
   onChange: (q: EditorQuestion) => void;
   onTypeChange: (type: QuestionType) => void;
@@ -59,6 +62,19 @@ export function QuestionEditor({
           {!q.id && (
             <span className="ms-2 rounded-full bg-velvet-100 px-2 py-0.5 text-xs font-semibold text-velvet-800">
               جديد
+            </span>
+          )}
+          {q.showIf && (
+            <span className="ms-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+              مشروط
+            </span>
+          )}
+          {q.semanticKey && (
+            <span
+              className="ms-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900"
+              title={`الهوية الدلالية: ${q.semanticKey}`}
+            >
+              مربوط بـ Flowmax
             </span>
           )}
         </h3>
@@ -137,6 +153,21 @@ export function QuestionEditor({
 
       {isChoiceType(q.type) && <OptionsEditor question={q} errors={errors} onChange={onChange} />}
 
+      <ConditionEditor
+        question={q}
+        number={number}
+        earlier={earlier}
+        error={errors.showIf}
+        onChange={onChange}
+      />
+
+      {q.semanticKey && (
+        <p className="mt-3 text-xs text-muted">
+          هذا السؤال من القالب العقاري ومربوط بحقل في Flowmax بهوية ثابتة؛ تغيير صياغته لا يؤثر على
+          الربط، أما حذفه فيجعل الحقل ناقصًا عند الاعتماد إن كان مطلوبًا.
+        </p>
+      )}
+
       <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl px-1 py-2">
         <input
           type="checkbox"
@@ -148,6 +179,120 @@ export function QuestionEditor({
         <span className="text-sm font-semibold text-ink">سؤال إجباري</span>
       </label>
     </section>
+  );
+}
+
+/** شرط الظهور: سؤال اختيار سابق وخيارات تُظهر هذا السؤال. */
+function ConditionEditor({
+  question: q,
+  number,
+  earlier,
+  error,
+  onChange,
+}: {
+  question: EditorQuestion;
+  number: number;
+  earlier: EditorQuestion[];
+  error?: string;
+  onChange: (q: EditorQuestion) => void;
+}) {
+  const selectId = useId();
+  const candidates = earlier
+    .map((x, i) => ({ q: x, number: i + 1 }))
+    .filter((x) => isChoiceType(x.q.type));
+  const target = q.showIf ? earlier.find((x) => x.key === q.showIf!.questionKey) : undefined;
+  const enabled = Boolean(q.showIf);
+
+  function enable(on: boolean) {
+    if (!on) return onChange({ ...q, showIf: null });
+    const first = candidates[0]?.q;
+    if (first) onChange({ ...q, showIf: { questionKey: first.key, optionKeys: [] } });
+  }
+
+  return (
+    <fieldset className="mt-4 rounded-xl border border-smoke-200 bg-white/50 p-4">
+      <legend className="px-1 text-sm font-bold text-velvet-900">شرط الظهور</legend>
+      <label className="flex w-fit cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
+          className="size-5 accent-velvet-700"
+          aria-label={`إظهار السؤال ${number} حسب إجابة سؤال سابق`}
+          checked={enabled}
+          disabled={!enabled && candidates.length === 0}
+          onChange={(e) => enable(e.target.checked)}
+        />
+        <span className="text-sm text-ink">إظهار هذا السؤال فقط حسب إجابة سؤال اختيار سابق</span>
+      </label>
+      {!enabled && candidates.length === 0 && (
+        <p className="mt-1 text-xs text-muted">لا يوجد سؤال اختيار قبل هذا السؤال.</p>
+      )}
+      {enabled && (
+        <div className="mt-3 flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label htmlFor={selectId} className="text-sm font-semibold text-ink">
+              يعتمد على السؤال
+            </label>
+            <SelectInput
+              id={selectId}
+              value={target?.key ?? ''}
+              onChange={(e) =>
+                onChange({ ...q, showIf: { questionKey: e.target.value, optionKeys: [] } })
+              }
+            >
+              {!target && <option value="">اختر سؤالًا…</option>}
+              {candidates.map((c) => (
+                <option key={c.q.key} value={c.q.key}>
+                  {c.number}. {c.q.title.trim() || 'سؤال بلا عنوان'}
+                </option>
+              ))}
+            </SelectInput>
+          </div>
+          {target && isChoiceType(target.type) && (
+            <fieldset>
+              <legend className="mb-2 text-sm font-semibold text-ink">
+                يظهر عند اختيار أي من:
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {target.options.map((o) => {
+                  const on = q.showIf!.optionKeys.includes(o.key);
+                  return (
+                    <label
+                      key={o.key}
+                      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
+                        on ? 'border-velvet-500 bg-velvet-50' : 'border-smoke-300 bg-white/70'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-velvet-700"
+                        aria-label={o.label || 'خيار بلا نص'}
+                        checked={on}
+                        onChange={(e) =>
+                          onChange({
+                            ...q,
+                            showIf: {
+                              questionKey: target.key,
+                              optionKeys: e.target.checked
+                                ? [...q.showIf!.optionKeys, o.key]
+                                : q.showIf!.optionKeys.filter((k) => k !== o.key),
+                            },
+                          })
+                        }
+                      />
+                      {o.label || 'خيار بلا نص'}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
+          <p className="text-xs text-muted">
+            السؤال المخفي لا يكون إجباريًا، ولا تُقبل له إجابة أو ملفات عند الإرسال.
+          </p>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm font-medium text-red-800">{error}</p>}
+    </fieldset>
   );
 }
 

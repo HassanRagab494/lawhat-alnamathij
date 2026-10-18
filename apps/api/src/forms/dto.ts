@@ -13,11 +13,12 @@ import {
 } from 'class-validator';
 import { PageMetaDto, PageQueryDto } from '../common/pagination';
 import { Trim, TrimToNull } from '../common/transforms';
+import { FORM_TEMPLATES, type FormTemplate } from './templates/real-estate';
 
 export const FORM_TITLE_MAX = 200;
 export const FORM_DESCRIPTION_MAX = 2000;
 
-export class CreateFormDto {
+export class FormBasicsDto {
   @ApiProperty({ maxLength: FORM_TITLE_MAX, example: 'نموذج طلب خدمة' })
   @Trim()
   @MaxLength(FORM_TITLE_MAX, { message: `عنوان النموذج يجب ألا يزيد عن ${FORM_TITLE_MAX} حرف.` })
@@ -36,7 +37,18 @@ export class CreateFormDto {
   description?: string | null;
 }
 
-export class UpdateFormDto extends CreateFormDto {
+export class CreateFormDto extends FormBasicsDto {
+  @ApiPropertyOptional({
+    enum: FORM_TEMPLATES,
+    description:
+      'قالب جاهز اختياري. real-estate-unified: نموذج عقاري موحّد بأسئلة العرض والطلب وشروطها، مربوط بـ Flowmax بهويات دلالية.',
+  })
+  @IsOptional()
+  @IsIn(FORM_TEMPLATES, { message: 'القالب غير معروف.' })
+  template?: FormTemplate;
+}
+
+export class UpdateFormDto extends FormBasicsDto {
   @ApiProperty({
     minimum: 1,
     description: 'رقم مراجعة المسودة الذي بُني عليه التعديل. يُرفض الطلب بـ 409 إن كان قديمًا.',

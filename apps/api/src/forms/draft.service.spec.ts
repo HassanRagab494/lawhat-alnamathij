@@ -202,7 +202,7 @@ describe('DraftService.saveDraft', () => {
     });
     expect(tx.formDraftQuestionOption.update).toHaveBeenCalledWith({
       where: { id: O2 },
-      data: { position: 0, label: 'جدة' },
+      data: { position: 0, label: 'جدة', semanticKey: null },
     });
     expect(tx.formDraftQuestion.create).toHaveBeenCalledTimes(1);
     expect(tx.formDraft.updateMany).toHaveBeenCalledTimes(1);

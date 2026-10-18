@@ -58,7 +58,11 @@ function AnswerValue({
     case 'empty':
       return (
         <p className="text-sm italic text-muted">
-          {answer.required ? 'لا توجد إجابة.' : 'لم تُقدَّم إجابة (سؤال اختياري).'}
+          {answer.hidden
+            ? 'غير ظاهر حسب إجابات هذا الرد (سؤال شرطي)، فلا إجابة له.'
+            : answer.required
+              ? 'لا توجد إجابة.'
+              : 'لم تُقدَّم إجابة (سؤال اختياري).'}
         </p>
       );
     case 'files':

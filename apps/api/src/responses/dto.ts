@@ -134,6 +134,11 @@ export class AnswerViewDto {
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty() required!: boolean;
   @ApiProperty({
+    description:
+      'true إن كان السؤال مخفيًا حسب إجابات هذا الرد (فرع غير نشط في سؤال شرطي)؛ لا إجابة له.',
+  })
+  hidden!: boolean;
+  @ApiProperty({
     enum: ANSWER_KINDS,
     description:
       'empty: لم يُجب (سؤال اختياري)؛ text/number/date: قيمة في value؛ choice: options مع selected؛ files: الملفات المرفقة في files',

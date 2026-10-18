@@ -14,6 +14,12 @@ export interface AnswerInput {
   date?: string | null;
   choices?: string[];
   files?: { id: string; name: string; kind: FileKind; size: number }[];
+  /** الهوية الدلالية للسؤال (نماذج القالب)؛ null للنماذج القديمة. */
+  semanticKey?: string | null;
+  /** الهويات الدلالية للخيارات المحددة، بترتيب الخيارات. */
+  choiceKeys?: string[];
+  /** سؤال مخفي حسب إجابات الرد (فرع غير نشط)؛ لا يُرسل شيء منه. */
+  hidden?: boolean;
 }
 
 export interface Problem {

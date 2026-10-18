@@ -1,4 +1,4 @@
-import type { AnswerValue, RenderQuestion } from './answer-validation';
+import { visibleKeys, type AnswerValue, type RenderQuestion } from './answer-validation';
 import type { QuestionType } from './question-limits';
 import type { FieldError } from './types';
 
@@ -18,6 +18,8 @@ export interface PublicQuestion {
   required: boolean;
   settings: RenderQuestion['settings'];
   options: PublicOption[];
+  /** شرط الظهور بالمفاتيح المنطقية؛ null = ظاهر دائمًا. */
+  showIf?: { questionKey: string; optionKeys: string[] } | null;
 }
 
 export interface PublicForm {
@@ -56,6 +58,7 @@ export function toRenderQuestions(form: PublicForm): RenderQuestion[] {
     required: q.required,
     settings: q.settings ?? {},
     options: q.options.map((o) => ({ key: o.key, label: o.label })),
+    showIf: q.showIf ?? null,
   }));
 }
 
@@ -66,6 +69,7 @@ function isEmpty(v: AnswerValue): boolean {
 /**
  * يحوّل الإجابات إلى جسم الطلب بمعرّفات الإصدار الحالي. الفارغ لا يُرسل.
  * سؤال الملفات: معرّفات الملفات التي قبلها الخادم فقط (لا محتوى ملفات).
+ * أسئلة الفرع غير النشط لا تُرسل إجاباتها ولا ملفاتها (تبقى في الصفحة إن عاد المستخدم للفرع).
  */
 export function buildPayload(
   form: PublicForm,
@@ -73,9 +77,10 @@ export function buildPayload(
   idempotencyKey: string,
 ): SubmitPayload {
   const out: SubmitPayload['answers'] = [];
+  const visible = visibleKeys(toRenderQuestions(form), answers);
   for (const q of form.questions) {
     const value = answers[q.key];
-    if (isEmpty(value)) continue;
+    if (isEmpty(value) || !visible.has(q.key)) continue;
     if (q.type === 'FILE_UPLOAD') {
       if (Array.isArray(value) && value.length) out.push({ questionId: q.id, value: [...value] });
       continue;

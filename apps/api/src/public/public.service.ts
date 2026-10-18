@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { Errors } from '../common/errors';
 import { lockForm, runFormTransaction } from '../forms/form-transaction';
 import type { QuestionTypeKey } from '../forms/questions/limits';
+import { readShowIf, versionConditions } from '../forms/questions/visibility';
 import { UploadsService } from '../files/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { PublicFormDto, SubmitResultDto } from './public-dto';
@@ -38,6 +39,36 @@ function uniqueTarget(error: unknown): string | null {
     return Array.isArray(target) ? target.join(',') : String(target ?? '');
   }
   return null;
+}
+
+function publicShowIf(raw: unknown): { questionKey: string; optionKeys: string[] } | null {
+  const cond = readShowIf(raw);
+  return cond ? { questionKey: cond.questionId, optionKeys: cond.optionIds } : null;
+}
+
+type StoredVersionQuestion = {
+  id: string;
+  logicalId: string;
+  type: string;
+  title: string;
+  required: boolean;
+  settings: unknown;
+  showIf: unknown;
+  options: { id: string; logicalId: string }[];
+};
+
+/** أسئلة الإصدار بصيغة التحقق، مع شروط الظهور بمعرّفات هذا الإصدار (ما يرسله المتصفح). */
+export function versionQuestionsForValidation(questions: StoredVersionQuestion[]) {
+  const conditions = versionConditions(questions);
+  return questions.map((q) => ({
+    id: q.id,
+    type: q.type as QuestionTypeKey,
+    title: q.title,
+    required: q.required,
+    settings: (q.settings ?? {}) as Record<string, unknown>,
+    options: q.options.map((o) => ({ id: o.id })),
+    showIf: conditions.get(q.id) ?? null,
+  }));
 }
 
 export interface SubmitOutcome {
@@ -82,6 +113,7 @@ export class PublicService {
             required: q.required,
             settings: (q.settings ?? {}) as Record<string, unknown>,
             options: q.options.map((o) => ({ id: o.id, key: o.logicalId, label: o.label })),
+            showIf: publicShowIf(q.showIf),
           }))
         : [],
     };
@@ -142,14 +174,7 @@ export class PublicService {
           }
 
           const answers = validateAgainstVersion(
-            latest.questions.map((q) => ({
-              id: q.id,
-              type: q.type as QuestionTypeKey,
-              title: q.title,
-              required: q.required,
-              settings: (q.settings ?? {}) as Record<string, unknown>,
-              options: q.options.map((o) => ({ id: o.id })),
-            })),
+            versionQuestionsForValidation(latest.questions),
             input.answers,
           );
           // الملفات: من جلسة التعبئة نفسها وللسؤال والإصدار نفسيهما، غير مرتبطة وغير منتهية؛ تُقفل حتى الربط.

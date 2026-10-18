@@ -537,4 +537,210 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
     expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(0);
     await flowmaxApi().get(records(id)).expect(404);
   });
+
+  describe('النموذج العقاري الموحّد (هويات دلالية وأسئلة شرطية)', () => {
+    let tFormId: string;
+    let tPublicId: string;
+    let tDraft: any;
+    let tForm: any;
+    const tq = (semantic: string) => {
+      const dq = tDraft.questions.find((x: any) => x.semanticKey === semantic);
+      return tForm.questions.find((x: any) => x.key === dq.id);
+    };
+    const to = (semantic: string, option: string) => {
+      const dq = tDraft.questions.find((x: any) => x.semanticKey === semantic);
+      const key = dq.options.find((o: any) => o.semanticKey === option).id;
+      return tq(semantic).options.find((o: any) => o.key === key).id as string;
+    };
+    const tUrl = (id: string, action = '') =>
+      `/api/forms/${tFormId}/responses/${id}/flowmax${action}`;
+    const tState = async (id: string) => (await as(reviewer).get(tUrl(id)).expect(200)).body;
+
+    async function tSubmit(kind: 'offer' | 'request'): Promise<string> {
+      const server = app.getHttpServer();
+      const fill = (
+        await request(server)
+          .post(`/api/public/forms/${tPublicId}/upload-sessions`)
+          .set('Origin', ORIGIN)
+          .send({})
+          .expect(201)
+      ).body.token;
+      const up = async (semantic: string, name: string, data: Buffer) =>
+        (
+          await request(server)
+            .post(`/api/public/forms/${tPublicId}/files?questionId=${tq(semantic).id}`)
+            .set('Origin', ORIGIN)
+            .set('Content-Type', 'application/octet-stream')
+            .set('x-file-name', encodeURIComponent(name))
+            .set('x-fill-session', fill)
+            .send(data)
+            .expect(201)
+        ).body.id as string;
+      const answers =
+        kind === 'offer'
+          ? [
+              { questionId: tq('listing.kind').id, value: to('listing.kind', 'offer') },
+              { questionId: tq('offer.category').id, value: to('offer.category', 'apartment') },
+              { questionId: tq('offer.purpose').id, value: to('offer.purpose', 'rent') },
+              { questionId: tq('offer.role').id, value: to('offer.role', 'broker') },
+              { questionId: tq('offer.title').id, value: 'شقة للإيجار (قالب، تكامل فعلي)' },
+              {
+                questionId: tq('offer.description').id,
+                value: 'بيانات تجريبية — ليست عقارًا حقيقيًا.',
+              },
+              { questionId: tq('offer.city').id, value: 'الرياض' },
+              { questionId: tq('offer.district').id, value: 'الياسمين' },
+              { questionId: tq('offer.price').id, value: '65000' },
+              { questionId: tq('offer.area').id, value: '140.5' },
+              { questionId: tq('offer.bedrooms').id, value: '3' },
+              { questionId: tq('offer.bathrooms').id, value: '2' },
+              { questionId: tq('offer.living_rooms').id, value: '1' },
+              {
+                questionId: tq('offer.images').id,
+                value: [await up('offer.images', 'واجهة.png', samples.png())],
+              },
+              {
+                questionId: tq('offer.videos').id,
+                value: [await up('offer.videos', 'جولة.mp4', media('recorded.mp4'))],
+              },
+              { questionId: tq('contact.name').id, value: 'وسيط تجريبي' },
+              { questionId: tq('contact.phone').id, value: '0551234500' },
+            ]
+          : [
+              { questionId: tq('listing.kind').id, value: to('listing.kind', 'request') },
+              { questionId: tq('request.category').id, value: to('request.category', 'land') },
+              { questionId: tq('request.purpose').id, value: to('request.purpose', 'sale') },
+              { questionId: tq('request.land_use').id, value: 'سكني' },
+              { questionId: tq('request.city').id, value: 'الدمام' },
+              { questionId: tq('request.district').id, value: 'الشاطئ' },
+              { questionId: tq('request.budget_max').id, value: '1800000' },
+              { questionId: tq('request.budget_min').id, value: '1200000' },
+              {
+                questionId: tq('request.sale_priority').id,
+                value: to('request.sale_priority', 'urgent'),
+              },
+              { questionId: tq('request.land_area_min').id, value: '600' },
+              {
+                questionId: tq('request.finance_required').id,
+                value: to('request.finance_required', 'true'),
+              },
+              { questionId: tq('request.consent').id, value: to('request.consent', 'yes') },
+              { questionId: tq('contact.name').id, value: 'طالب تجريبي' },
+              { questionId: tq('contact.phone').id, value: '0551234501' },
+            ];
+      const res = await request(server)
+        .post(`/api/public/forms/${tPublicId}/responses`)
+        .set('Origin', ORIGIN)
+        .send({
+          versionId: tForm.versionId,
+          fillSession: fill,
+          idempotencyKey: randomUUID(),
+          answers,
+        })
+        .expect(201);
+      return (
+        await prisma.formResponse.findUniqueOrThrow({
+          where: { referenceCode: res.body.referenceCode },
+        })
+      ).id;
+    }
+
+    beforeAll(async () => {
+      tFormId = (
+        await as(admin)
+          .post('/api/forms', {
+            title: 'تسجيل عقار موحّد (تكامل فعلي)',
+            template: 'real-estate-unified',
+          })
+          .expect(201)
+      ).body.id;
+      tDraft = (await as(admin).get(`/api/forms/${tFormId}/draft`).expect(200)).body;
+      tPublicId = (
+        await as(admin)
+          .post(`/api/forms/${tFormId}/publish`, {
+            revision: tDraft.revision,
+            publishKey: randomUUID(),
+            openResponses: true,
+          })
+          .expect(200)
+      ).body.form.publication.publicId;
+      tForm = (await request(app.getHttpServer()).get(`/api/public/forms/${tPublicId}`).expect(200))
+        .body;
+    });
+
+    it('عرض من القالب ⇒ مسار العروض في Flowmax الحقيقي، نشر تلقائي، اعتماد مزدوج دون تكرار', async () => {
+      const id = await tSubmit('offer');
+      const results = await Promise.all([1, 2].map(() => as(reviewer).post(tUrl(id, '/approve'))));
+      expect(results.map((r) => r.status)).toEqual([202, 202]);
+      await app.get(FlowmaxService).whenIdle();
+      const s = (await tState(id)).sync;
+      expect(s).toMatchObject({
+        status: 'SENT',
+        operation: 'OFFER',
+        isPublic: true,
+        publishState: 'PUBLISHED',
+        attempts: 1,
+      });
+      // رمز التصنيف حسب الغرض (إيجار ⇒ J) كما يختاره معالج Flowmax
+      expect(s.flowmaxRef).toMatch(/^J-/);
+      const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+      expect(record).toMatchObject({
+        operation: 'offer',
+        status: 'Published',
+        is_public: true,
+        images_count: 1,
+        videos_count: 1,
+      });
+      expect(s.share).toMatchObject({
+        operation: 'OFFER',
+        purpose: 'إيجار',
+        category: 'شقة',
+        areaSqm: 140.5,
+        bedrooms: 3,
+      });
+      expect(JSON.stringify(s.share)).not.toMatch(/0551234500|وسيط تجريبي/);
+      const pub = await request(REAL_URL!)
+        .get(`/api/public/properties/${s.flowmaxId}`)
+        .set('Accept', 'application/json')
+        .expect(200);
+      expect(JSON.stringify(pub.body)).not.toMatch(/0551234500|وسيط تجريبي/);
+      await as(reviewer).post(tUrl(id, '/approve')).expect(202);
+      await app.get(FlowmaxService).whenIdle();
+      expect((await flowmaxApi().get(records(id)).expect(200)).body.data.id).toBe(record.id);
+      expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(1);
+    });
+
+    it('طلب من القالب ⇒ مسار الطلبات، بانتظار مراجعة Flowmax ودون مشاركة؛ التعطل ثم إعادة المحاولة دون تكرار', async () => {
+      const id = await tSubmit('request');
+      proxyState.mode = 'down';
+      await as(reviewer).post(tUrl(id, '/approve')).expect(202);
+      await app.get(FlowmaxService).whenIdle();
+      expect((await tState(id)).sync.status).toBe('FAILED');
+      await flowmaxApi().get(records(id)).expect(404);
+
+      proxyState.mode = 'pass';
+      await as(reviewer).post(tUrl(id, '/retry')).expect(202);
+      await app.get(FlowmaxService).whenIdle();
+      const s = (await tState(id)).sync;
+      expect(s).toMatchObject({
+        status: 'SENT',
+        operation: 'REQUEST',
+        isPublic: false,
+        share: null,
+        attempts: 2,
+      });
+      const record = (await flowmaxApi().get(records(id)).expect(200)).body.data;
+      expect(record).toMatchObject({
+        operation: 'demand',
+        status: 'under_review',
+        is_public: false,
+      });
+      expect(s.detailUrl).toBe(record.detail_url);
+      // الاعتماد مرة أخرى يعيد الحالة نفسها دون إنشاء جديد
+      await as(reviewer).post(tUrl(id, '/approve')).expect(202);
+      await app.get(FlowmaxService).whenIdle();
+      expect((await flowmaxApi().get(records(id)).expect(200)).body.data.id).toBe(record.id);
+      expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(1);
+    });
+  });
 });

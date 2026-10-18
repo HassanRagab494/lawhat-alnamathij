@@ -215,7 +215,7 @@ export function FlowmaxPanel({
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted">
               الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته ومرفقاته إلى Flowmax، ثم ينشر العرض
-              تلقائيًا بعد نجاح الإرسال. الطلب يُنشر من مراجعة Flowmax.
+              تلقائيًا بعد نجاح الإرسال. الطلب يبقى بانتظار مراجعة Flowmax قبل نشره.
             </p>
             {problems.length > 0 && (
               <Alert tone="warning" title="بيانات ناقصة تمنع الاعتماد">
@@ -332,9 +332,10 @@ export function FlowmaxPanel({
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-muted">
-                    الطلب قيد مراجعة Flowmax؛ تظهر المشاركة بعد نشره هناك.
-                  </p>
+                  <Alert tone="info" title="بانتظار مراجعة Flowmax">
+                    أُرسل الطلب ولم يُنشر بعد. لا يُعتبر منشورًا ولا تظهر المشاركة العامة حتى يؤكد
+                    Flowmax نشره بعد مراجعته.
+                  </Alert>
                   {canReview && (
                     <Button variant="secondary" onClick={() => void act('refresh')} loading={busy}>
                       تحديث الحالة من Flowmax
