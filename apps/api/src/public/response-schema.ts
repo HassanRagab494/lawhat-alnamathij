@@ -130,6 +130,13 @@ function isValidDate(v: string): boolean {
 export function validateAgainstVersion(
   questions: VersionQuestionForValidation[],
   input: SubmitResponseInput['answers'],
+  options: {
+    /**
+     * تعديل الإدارة: إجابات قديمة محفوظة لأسئلة صارت مخفية تبقى كما هي ولا تُرفض (لا تُرسل ولا تُحذف).
+     * الإرسال العام يرفضها دائمًا.
+     */
+    ignoreHiddenAnswers?: boolean;
+  } = {},
 ): NormalizedAnswer[] {
   const errors: FieldError[] = [];
   const byId = new Map(questions.map((q) => [q.id, q]));
@@ -174,7 +181,9 @@ export function validateAgainstVersion(
     const empty = raw === undefined || (Array.isArray(raw) ? raw.length === 0 : raw.trim() === '');
     if (!visible.has(q.id)) {
       // سؤال فرع غير نشط: ليس إجباريًا، ولا تُقبل له إجابة أو ملفات حتى لو أُرسلت يدويًا.
-      if (!empty) fail('هذا السؤال غير ظاهر حسب إجاباتك، فلا تُقبل له إجابة.');
+      if (!empty && !options.ignoreHiddenAnswers) {
+        fail('هذا السؤال غير ظاهر حسب إجاباتك، فلا تُقبل له إجابة.');
+      }
       continue;
     }
     if (empty) {

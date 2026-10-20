@@ -60,7 +60,8 @@ describe('قالب النموذج العقاري الموحّد', () => {
     const apartment = visibleKeys({ 'listing.kind': ['offer'], 'offer.category': ['apartment'] });
     expect(apartment).toEqual(
       expect.arrayContaining([
-        'offer.title',
+        'offer.description',
+        'offer.kitchens',
         'offer.price',
         'offer.images',
         'offer.bedrooms',

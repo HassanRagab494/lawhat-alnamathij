@@ -75,6 +75,10 @@ const detail = {
     },
   ],
   statusHistory: [],
+  editRevision: 0,
+  edits: [],
+  locked: false,
+  rejection: null,
 };
 
 const share = {
@@ -248,7 +252,7 @@ it('مرفق غير متوافق: يُعرض بسببه ويمنع الاعتم�
   await waitFor(() =>
     expect(apiMock).toHaveBeenCalledWith('/forms/form-1/responses/resp-1/flowmax/approve', {
       method: 'POST',
-      body: { excludeFileIds: ['f-mp4'] },
+      body: { excludeFileIds: ['f-mp4'], editRevision: 0 },
     }),
   );
 });
@@ -399,7 +403,7 @@ it('بعد النشر: ملخص للأدمن بالنوع والموقع وال�
   expect(text).toMatch(/الغرف3/);
   const wa = screen.getByRole('link', { name: 'مشاركة واتساب' });
   const message = decodeURIComponent(wa.getAttribute('href')!.split('text=')[1]!);
-  expect(message).toContain('المساحة: 145.5 م² · الغرف: 3 · دورات المياه: 2');
+  expect(message).toContain('المساحة: 145.5 م² · الغرف: 3 · الحمامات: 2');
   expect(message).not.toMatch(/سارة|05\d{8}|\+966/);
 });
 

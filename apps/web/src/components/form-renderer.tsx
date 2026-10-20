@@ -38,8 +38,12 @@ export interface PublicModeProps {
   notice?: ReactNode;
   /** يعطّل الإرسال (مثلًا حين يلزم تحديث النموذج أولًا). */
   submitDisabled?: boolean;
-  /** رفع الملفات الفعلي لأسئلة الملفات (الصفحة العامة فقط). */
+  /** رفع الملفات الفعلي لأسئلة الملفات (الصفحة العامة وتعديل الرد). */
   uploads?: UploadsController;
+  /** نص زر الإرسال (الافتراضي «إرسال»). */
+  submitLabel?: string;
+  /** إخفاء ترويسة النموذج (عند التضمين داخل صفحة أخرى مثل تعديل الرد). */
+  hideHeader?: boolean;
 }
 
 /**
@@ -135,21 +139,23 @@ export function FormRenderer({
         </Alert>
       )}
 
-      <section className="glass rounded-2xl border-t-4 border-t-velvet-700 p-5 sm:p-6">
-        {publicMode ? (
-          <h1 className="text-xl font-bold text-velvet-900 sm:text-2xl">{heading}</h1>
-        ) : (
-          <h2 className="text-xl font-bold text-velvet-900">{heading}</h2>
-        )}
-        {description && (
-          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted">
-            {description}
-          </p>
-        )}
-        {questions.some((q) => q.required) && (
-          <p className="mt-3 text-xs text-red-800">* يشير إلى سؤال إجباري</p>
-        )}
-      </section>
+      {!publicMode?.hideHeader && (
+        <section className="glass rounded-2xl border-t-4 border-t-velvet-700 p-5 sm:p-6">
+          {publicMode ? (
+            <h1 className="text-xl font-bold text-velvet-900 sm:text-2xl">{heading}</h1>
+          ) : (
+            <h2 className="text-xl font-bold text-velvet-900">{heading}</h2>
+          )}
+          {description && (
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted">
+              {description}
+            </p>
+          )}
+          {questions.some((q) => q.required) && (
+            <p className="mt-3 text-xs text-red-800">* يشير إلى سؤال إجباري</p>
+          )}
+        </section>
+      )}
 
       {questions.length === 0 ? (
         <section className="glass rounded-2xl">
@@ -221,7 +227,11 @@ export function FormRenderer({
             loading={publicMode.submitting}
             disabled={publicMode.submitDisabled}
           >
-            {publicMode.submitting ? 'جارٍ الإرسال…' : 'إرسال'}
+            {publicMode.submitting
+              ? publicMode.submitLabel
+                ? 'جارٍ الحفظ…'
+                : 'جارٍ الإرسال…'
+              : (publicMode.submitLabel ?? 'إرسال')}
           </Button>
         </div>
       )}

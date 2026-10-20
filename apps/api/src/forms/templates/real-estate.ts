@@ -11,6 +11,9 @@ import type { SaveDraftInput } from '../questions/draft-schema';
  * - الطلب: StoreAdminPropertyDemandRequest ونموذج طلب العقار في موقع Flowmax
  *   (frontend/website/properties/components/PropertyDemandForm.js).
  *
+ * عنوان الإعلان لا يُسأل في النماذج الجديدة؛ يُبنى من نوع العقار والغرض والموقع (النماذج القديمة التي فيها
+ * سؤال offer.title تبقى تستخدم إجابته). «إجمالي الغرف» أُزيل من النماذج الجديدة لأن «عدد الغرف» يغطيه.
+ *
  * كل سؤال وخيار يحمل هوية دلالية ثابتة (semanticKey) يقرأها التكامل بدل عنوان السؤال،
  * فتغيير الصياغة من المحرر لا يكسر الربط.
  */
@@ -149,19 +152,10 @@ const QUESTIONS: TemplateQuestion[] = [
     showIf: offer(),
   },
   {
-    key: 'offer.title',
-    type: 'SHORT_TEXT',
-    title: 'عنوان الإعلان',
-    description: 'مثال: شقة للبيع في حي النرجس',
-    required: true,
-    settings: text(500),
-    showIf: offer(),
-  },
-  {
     key: 'offer.description',
     type: 'PARAGRAPH',
     title: 'وصف العقار',
-    description: 'أهم المميزات والموقع وحالة العقار.',
+    description: 'أهم المميزات والموقع وحالة العقار. يظهر وصفًا للإعلان في Flowmax.',
     required: true,
     settings: text(10000),
     showIf: offer(),
@@ -209,14 +203,21 @@ const QUESTIONS: TemplateQuestion[] = [
   {
     key: 'offer.bedrooms',
     type: 'NUMBER',
-    title: 'عدد غرف النوم',
+    title: 'عدد الغرف',
     settings: integer(0, 1000),
     showIf: ['offer.category', OFFER_ROOM_CATEGORIES],
   },
   {
     key: 'offer.bathrooms',
     type: 'NUMBER',
-    title: 'عدد دورات المياه',
+    title: 'عدد الحمامات',
+    settings: integer(0, 1000),
+    showIf: ['offer.category', OFFER_ROOM_CATEGORIES],
+  },
+  {
+    key: 'offer.kitchens',
+    type: 'NUMBER',
+    title: 'عدد المطابخ',
     settings: integer(0, 1000),
     showIf: ['offer.category', OFFER_ROOM_CATEGORIES],
   },
@@ -391,21 +392,22 @@ const QUESTIONS: TemplateQuestion[] = [
   {
     key: 'request.bedrooms_min',
     type: 'NUMBER',
-    title: 'غرف النوم (الحد الأدنى)',
-    settings: integer(0, 1000),
-    showIf: ['request.category', requestNonLand],
-  },
-  {
-    key: 'request.rooms_count',
-    type: 'NUMBER',
-    title: 'إجمالي الغرف',
+    title: 'عدد الغرف (الحد الأدنى)',
     settings: integer(0, 1000),
     showIf: ['request.category', requestNonLand],
   },
   {
     key: 'request.bathrooms_min',
     type: 'NUMBER',
-    title: 'دورات المياه (الحد الأدنى)',
+    title: 'عدد الحمامات (الحد الأدنى)',
+    settings: integer(0, 1000),
+    showIf: ['request.category', requestNonLand],
+  },
+  {
+    key: 'request.kitchens_min',
+    type: 'NUMBER',
+    title: 'عدد المطابخ (الحد الأدنى)',
+    description: 'يُحفظ في الرد للإدارة؛ طلبات Flowmax لا تدعم هذا المعيار.',
     settings: integer(0, 1000),
     showIf: ['request.category', requestNonLand],
   },

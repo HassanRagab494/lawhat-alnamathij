@@ -48,7 +48,7 @@ const DRAIN_MAX_BYTES = 32 * 1024 * 1024;
 const DRAIN_TIMEOUT_MS = 15_000;
 
 /** يستهلك ما تبقى من جسم الطلب دون تخزينه، بحد للحجم والوقت؛ وإلا يقطع الاتصال. */
-function drain(req: Request): Promise<void> {
+export function drain(req: Request): Promise<void> {
   if (req.readableEnded || req.destroyed) return Promise.resolve();
   return new Promise((resolve) => {
     let bytes = 0;

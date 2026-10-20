@@ -30,6 +30,8 @@ export interface Problem {
 /** لقطة المشاركة: حقول عامة مسموحة فقط، دون اسم المالك أو جواله. */
 export interface ShareInfo {
   title: string;
+  /** وصف العقار كما أُرسل إلى Flowmax (يظهر في الملخص ونص المشاركة فوق الرابط). */
+  description?: string | null;
   operation: Operation;
   purpose: string | null;
   category: string | null;
@@ -39,6 +41,7 @@ export interface ShareInfo {
   areaSqm: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  kitchens?: number | null;
 }
 
 export interface BuildResult {
@@ -47,6 +50,8 @@ export interface BuildResult {
   share: ShareInfo | null;
   media: MediaCandidate[];
   problems: Problem[];
+  /** ملاحظات لا تمنع الاعتماد (مثل حقل محفوظ داخليًا لا يدعمه Flowmax). */
+  notices?: string[];
 }
 
 /** أرقام عربية/فارسية ⇒ لاتينية. */

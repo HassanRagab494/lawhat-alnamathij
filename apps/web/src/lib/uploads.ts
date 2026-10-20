@@ -1,4 +1,4 @@
-import { ApiError, toApiError } from './api';
+import { ApiError, CSRF_COOKIE, readCookie, toApiError } from './api';
 import {
   FILE_TYPE_LABELS,
   QUESTION_LIMITS,
@@ -101,14 +101,46 @@ export function uploadFile(
   onProgress: (percent: number) => void,
   onUploaded: () => void,
 ): { promise: Promise<{ id: string; name: string; size: number }>; abort: () => void } {
+  return sendFile(
+    `/api/public/forms/${encodeURIComponent(publicId)}/files?questionId=${encodeURIComponent(questionId)}`,
+    { 'x-fill-session': token },
+    file,
+    onProgress,
+    onUploaded,
+  );
+}
+
+/** رفع مرفق لتعديل رد قائم (لوحة الإدارة): جلسة المستخدم ورمز CSRF بدل جلسة التعبئة. */
+export function uploadResponseFile(
+  formId: string,
+  responseId: string,
+  questionId: string,
+  file: File,
+  onProgress: (percent: number) => void,
+  onUploaded: () => void,
+): { promise: Promise<{ id: string; name: string; size: number }>; abort: () => void } {
+  const csrf = typeof document === 'undefined' ? null : readCookie(CSRF_COOKIE, document.cookie);
+  return sendFile(
+    `/api/forms/${encodeURIComponent(formId)}/responses/${encodeURIComponent(responseId)}/files?questionId=${encodeURIComponent(questionId)}`,
+    csrf ? { 'x-csrf-token': csrf } : {},
+    file,
+    onProgress,
+    onUploaded,
+  );
+}
+
+function sendFile(
+  url: string,
+  headers: Record<string, string>,
+  file: File,
+  onProgress: (percent: number) => void,
+  onUploaded: () => void,
+): { promise: Promise<{ id: string; name: string; size: number }>; abort: () => void } {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<{ id: string; name: string; size: number }>((resolve, reject) => {
-    xhr.open(
-      'POST',
-      `/api/public/forms/${encodeURIComponent(publicId)}/files?questionId=${encodeURIComponent(questionId)}`,
-    );
+    xhr.open('POST', url);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-    xhr.setRequestHeader('x-fill-session', token);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
     xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));

@@ -17,7 +17,9 @@ import { CsvBuilder, EXPORT_MAX_ROWS, csvRow, riyadhDateTime } from './csv';
 import {
   RESPONSE_STATUS_LABELS,
   type AnswerViewDto,
+  REJECTION_REASON_MIN,
   type ResponseDetailDto,
+  type ResponseEditDto,
   type ResponseFilterQueryDto,
   type ResponseListDto,
   type ResponseListQueryDto,
@@ -47,7 +49,9 @@ const detailInclude = {
   answers: {
     include: {
       options: { select: { optionId: true } },
+      // المرفقات التي أزالها تعديل إداري تبقى محفوظة وتظهر في سجل التعديلات فقط
       files: {
+        where: { removedAt: null },
         orderBy: { createdAt: 'asc' },
         select: { id: true, originalName: true, sizeBytes: true, kind: true, scanEngine: true },
       },
@@ -57,6 +61,11 @@ const detailInclude = {
     orderBy: [{ changedAt: 'asc' }, { id: 'asc' }],
     include: { changedBy: { select: { displayName: true } } },
   },
+  edits: {
+    orderBy: [{ editedAt: 'asc' }, { id: 'asc' }],
+    include: { editedBy: { select: { displayName: true } } },
+  },
+  flowmaxSync: { select: { id: true } },
 } satisfies Prisma.FormResponseInclude;
 
 type ResponseWithDetail = Prisma.FormResponseGetPayload<{ include: typeof detailInclude }>;
@@ -133,9 +142,34 @@ export function toDetailDto(r: ResponseWithDetail): ResponseDetailDto {
     statusHistory: r.statusChanges.map((c) => ({
       fromStatus: c.fromStatus,
       toStatus: c.toStatus,
+      reason: c.reason,
       changedBy: c.changedBy?.displayName ?? null,
       changedAt: c.changedAt.toISOString(),
     })),
+    editRevision: r.editRevision,
+    edits: r.edits.map((e) => ({
+      revision: e.revision,
+      questionId: e.questionId,
+      questionTitle: e.questionTitle,
+      oldValue: (e.oldValue ?? null) as ResponseEditDto['oldValue'],
+      newValue: (e.newValue ?? null) as ResponseEditDto['newValue'],
+      editedBy: e.editedBy?.displayName ?? null,
+      editedAt: e.editedAt.toISOString(),
+    })),
+    locked: Boolean(r.flowmaxSync),
+    rejection: currentRejection(r),
+  };
+}
+
+/** سبب الرفض الحالي: آخر تغيير إلى «مرفوض» ما دامت الحالة مرفوض. */
+function currentRejection(r: ResponseWithDetail): ResponseDetailDto['rejection'] {
+  if (r.status !== 'REJECTED') return null;
+  const last = [...r.statusChanges].reverse().find((c) => c.toStatus === 'REJECTED');
+  if (!last) return null;
+  return {
+    reason: last.reason ?? '',
+    rejectedBy: last.changedBy?.displayName ?? null,
+    rejectedAt: last.changedAt.toISOString(),
   };
 }
 
@@ -291,7 +325,17 @@ export class ResponsesService {
     responseId: string,
     status: ResponseStatus,
     meta: RequestMeta,
+    reason?: string,
   ): Promise<UpdateStatusResultDto> {
+    const why = reason?.trim() || null;
+    if (status === 'REJECTED' && (!why || why.length < REJECTION_REASON_MIN)) {
+      throw Errors.validation([
+        {
+          field: 'reason',
+          message: `اكتب سبب الرفض (${REJECTION_REASON_MIN} أحرف على الأقل)؛ يُحفظ في سجل الحالات ويمكن مشاركته مع العميل.`,
+        },
+      ]);
+    }
     const changed = await runFormTransaction(this.prisma, async (tx) => {
       const rows = await tx.$queryRaw<{ form_id: string; status: ResponseStatus }[]>`
         SELECT form_id, status FROM form_responses WHERE id = ${responseId} FOR UPDATE`;
@@ -304,6 +348,7 @@ export class ResponsesService {
           responseId,
           fromStatus: current.status,
           toStatus: status,
+          reason: why,
           changedById: actor.userId,
         },
       });
@@ -313,7 +358,12 @@ export class ResponsesService {
           action: 'response.status_changed',
           entityType: 'response',
           entityId: responseId,
-          details: { formId, from: current.status, to: status },
+          details: {
+            formId,
+            from: current.status,
+            to: status,
+            ...(why ? { withReason: true } : {}),
+          },
           ipAddress: meta.ipAddress,
         },
         tx,
@@ -428,7 +478,11 @@ export class ResponsesService {
               numberValue: true,
               dateValue: true,
               options: { select: { optionId: true } },
-              files: { orderBy: { createdAt: 'asc' }, select: { originalName: true } },
+              files: {
+                where: { removedAt: null },
+                orderBy: { createdAt: 'asc' },
+                select: { originalName: true },
+              },
             },
           },
         },

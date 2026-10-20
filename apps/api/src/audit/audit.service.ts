@@ -25,6 +25,8 @@ export type AuditAction =
   | 'form.archived'
   | 'form.restored'
   | 'response.status_changed'
+  | 'response.edited'
+  | 'response.rejection_share_opened'
   | 'responses.exported'
   | 'response.file_downloaded'
   | 'response.file_previewed'

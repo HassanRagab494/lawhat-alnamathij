@@ -6,6 +6,8 @@ export type FlowmaxOperation = 'OFFER' | 'REQUEST';
 /** بيانات المشاركة الآمنة: لا تحتوي اسم المالك ولا جواله ولا أي ملاحظات داخلية. */
 export interface FlowmaxShare {
   title: string;
+  /** وصف العقار كما أُرسل إلى Flowmax (يظهر فوق الرابط). */
+  description?: string | null;
   operation: FlowmaxOperation;
   purpose: string | null;
   category: string | null;
@@ -16,6 +18,7 @@ export interface FlowmaxShare {
   areaSqm?: number | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
+  kitchens?: number | null;
 }
 
 export type FlowmaxPublishState = 'NONE' | 'REQUESTED' | 'PUBLISHED' | 'FAILED';
@@ -62,7 +65,24 @@ export interface FlowmaxState {
   precheck: {
     problems: { field: string; message: string }[];
     incompatibleMedia: IncompatibleMedia[];
+    /** ملاحظات لا تمنع الاعتماد. */
+    notices?: string[];
   } | null;
+  /** الرد مرفوض: لا يُرسل ولا يُعرض رابطه أو مشاركته. */
+  rejected?: boolean;
+  /** رقم مراجعة تعديلات الرد؛ يُرسل مع الاعتماد. */
+  editRevision?: number;
+}
+
+/** أقصى طول للوصف في نص المشاركة (الوصف الكامل في صفحة Flowmax). */
+export const SHARE_DESCRIPTION_MAX = 300;
+
+export function shortDescription(text: string | null | undefined): string | null {
+  const t = text?.trim();
+  if (!t) return null;
+  return t.length > SHARE_DESCRIPTION_MAX
+    ? `${t.slice(0, SHARE_DESCRIPTION_MAX - 1).trimEnd()}…`
+    : t;
 }
 
 export const MEDIA_STATUS_LABELS: Record<FlowmaxMediaStatus, string> = {
@@ -99,7 +119,7 @@ export function formatPriceSar(value: string): string {
 }
 
 /**
- * نص المشاركة: العنوان، نوع العرض/الطلب، المدينة والحي، السعر إن وجد، ثم الرابط.
+ * نص المشاركة: العنوان، نوع العرض/الطلب، المدينة والحي، السعر، المواصفات، ثم وصف العقار فوق الرابط.
  * يُبنى من بيانات المشاركة الآمنة فقط، فلا يدخله اسم المالك أو جواله.
  */
 export function shareText(share: FlowmaxShare, url: string): string {
@@ -114,18 +134,20 @@ export function shareText(share: FlowmaxShare, url: string): string {
     share.priceSar &&
       `${share.operation === 'REQUEST' ? 'الميزانية' : 'السعر'}: ${formatPriceSar(share.priceSar)}`,
     specsText(share),
+    shortDescription(share.description),
     url,
   ]
     .filter(Boolean)
     .join('\n');
 }
 
-/** المساحة والغرف ودورات المياه في سطر واحد، مثل «المساحة: 145.5 م² · الغرف: 3 · دورات المياه: 2». */
+/** المساحة والغرف والحمامات والمطابخ في سطر واحد، مثل «المساحة: 145.5 م² · الغرف: 3 · الحمامات: 2». */
 export function specsText(share: FlowmaxShare): string {
   return [
     share.areaSqm != null && `المساحة: ${share.areaSqm} م²`,
     share.bedrooms != null && `الغرف: ${share.bedrooms}`,
-    share.bathrooms != null && `دورات المياه: ${share.bathrooms}`,
+    share.bathrooms != null && `الحمامات: ${share.bathrooms}`,
+    share.kitchens != null && `المطابخ: ${share.kitchens}`,
   ]
     .filter(Boolean)
     .join(' · ');

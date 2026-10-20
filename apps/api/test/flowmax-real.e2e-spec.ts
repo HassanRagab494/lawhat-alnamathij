@@ -583,7 +583,6 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
               { questionId: tq('offer.category').id, value: to('offer.category', 'apartment') },
               { questionId: tq('offer.purpose').id, value: to('offer.purpose', 'rent') },
               { questionId: tq('offer.role').id, value: to('offer.role', 'broker') },
-              { questionId: tq('offer.title').id, value: 'شقة للإيجار (قالب، تكامل فعلي)' },
               {
                 questionId: tq('offer.description').id,
                 value: 'بيانات تجريبية — ليست عقارًا حقيقيًا.',
@@ -595,6 +594,7 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
               { questionId: tq('offer.bedrooms').id, value: '3' },
               { questionId: tq('offer.bathrooms').id, value: '2' },
               { questionId: tq('offer.living_rooms').id, value: '1' },
+              { questionId: tq('offer.kitchens').id, value: '1' },
               {
                 questionId: tq('offer.images').id,
                 value: [await up('offer.images', 'واجهة.png', samples.png())],
@@ -704,6 +704,14 @@ run('تكامل فعلي مع Flowmax محلي منفصل', () => {
         .set('Accept', 'application/json')
         .expect(200);
       expect(JSON.stringify(pub.body)).not.toMatch(/0551234500|وسيط تجريبي/);
+      // «وصف العقار» هو وصف الإعلان في Flowmax، والعنوان من النوع والغرض والموقع (لا سؤال عنوان)
+      expect(pub.body.data).toMatchObject({
+        description_ar: 'بيانات تجريبية — ليست عقارًا حقيقيًا.',
+        title_ar: 'شقة للإيجار في الرياض — الياسمين',
+        bedrooms_count: 3,
+        bathrooms_count: 2,
+        kitchens_count: 1,
+      });
       await as(reviewer).post(tUrl(id, '/approve')).expect(202);
       await app.get(FlowmaxService).whenIdle();
       expect((await flowmaxApi().get(records(id)).expect(200)).body.data.id).toBe(record.id);

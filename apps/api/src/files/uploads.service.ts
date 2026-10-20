@@ -224,6 +224,66 @@ export class UploadsService {
   ): Promise<UploadedFileDto> {
     this.assertEnabled();
     const session = await this.session(publicId, token);
+    return this.storeFile(session, questionId, rawName, contentLength, body);
+  }
+
+  /**
+   * رفع ملف إداري لتعديل رد قائم قبل اعتماده: جلسة داخلية مرتبطة بالرد (بلا رمز عام) لإصدار الرد نفسه.
+   * الملف لا يُربط بالرد إلا عند حفظ التعديل؛ إن لم يُحفظ يحذفه التنظيف الحالي بعد انتهاء صلاحيته.
+   */
+  async uploadForResponse(
+    formId: string,
+    responseId: string,
+    questionId: string | undefined,
+    rawName: string | undefined,
+    contentLength: number | undefined,
+    body: Readable,
+  ): Promise<UploadedFileDto> {
+    this.assertEnabled();
+    const response = await this.prisma.formResponse.findFirst({
+      where: { id: responseId, formId },
+      select: { versionId: true, flowmaxSync: { select: { id: true } } },
+    });
+    if (!response) throw Errors.notFound('الرد غير موجود.');
+    if (response.flowmaxSync) {
+      throw Errors.conflict('RESPONSE_LOCKED', 'أُرسل هذا الرد إلى Flowmax، فلا يمكن تعديله.');
+    }
+    const now = new Date();
+    const session =
+      (await this.prisma.fillSession.findFirst({
+        where: {
+          responseId,
+          versionId: response.versionId,
+          expiresAt: { gt: new Date(now.getTime() + 5 * 60_000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      })) ??
+      (await this.prisma.fillSession.create({
+        data: {
+          // رمز عشوائي لا يُعاد لأحد: الجلسة لا تُستخدم من المسارات العامة
+          tokenHash: hashFillToken(randomBytes(32).toString('base64url')),
+          formId,
+          versionId: response.versionId,
+          responseId,
+          expiresAt: new Date(now.getTime() + this.env.UPLOAD_SESSION_TTL_MINUTES * 60_000),
+        },
+      }));
+    return this.storeFile(session, questionId, rawName, contentLength, body);
+  }
+
+  private async storeFile(
+    session: {
+      id: string;
+      formId: string;
+      versionId: string;
+      uploadedBytes: number;
+      expiresAt: Date;
+    },
+    questionId: string | undefined,
+    rawName: string | undefined,
+    contentLength: number | undefined,
+    body: Readable,
+  ): Promise<UploadedFileDto> {
     if (!questionId || !UUID_RE.test(questionId)) {
       throw Errors.validation([{ field: 'questionId', message: 'السؤال غير صالح.' }]);
     }
@@ -395,7 +455,13 @@ export class UploadsService {
       token && TOKEN_RE.test(token)
         ? await tx.fillSession.findUnique({ where: { tokenHash: hashFillToken(token) } })
         : null;
-    if (!session || session.formId !== formId || session.versionId !== versionId) {
+    // جلسات تعديل الإدارة (responseId) لا تصلح للإرسال العام
+    if (
+      !session ||
+      session.responseId ||
+      session.formId !== formId ||
+      session.versionId !== versionId
+    ) {
       throw Errors.validation(
         answers.filter((a) => a.fileIds.length).map((a) => invalid(a.questionId)),
       );

@@ -173,7 +173,7 @@ export class ResponsesController {
   @ApiOperation({
     summary: 'تغيير حالة الرد',
     description:
-      'NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.',
+      'NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. REJECTED يتطلب reason (يُحفظ في سجل الحالات). لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.',
   })
   @ApiBody({ type: UpdateResponseStatusDto })
   @ApiOkResponse({ type: UpdateStatusResultDto })
@@ -185,6 +185,6 @@ export class ResponsesController {
     @Body() dto: UpdateResponseStatusDto,
     @RequestMetaData() meta: RequestMeta,
   ): Promise<UpdateStatusResultDto> {
-    return this.responses.updateStatus(auth, formId, responseId, dto.status, meta);
+    return this.responses.updateStatus(auth, formId, responseId, dto.status, meta, dto.reason);
   }
 }

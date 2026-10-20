@@ -153,6 +153,8 @@ export class AnswerViewDto {
 export class StatusChangeDto {
   @ApiProperty({ enum: RESPONSE_STATUSES }) fromStatus!: ResponseStatus;
   @ApiProperty({ enum: RESPONSE_STATUSES }) toStatus!: ResponseStatus;
+  @ApiProperty({ type: String, nullable: true, description: 'سبب التغيير (إلزامي عند الرفض)' })
+  reason!: string | null;
   @ApiProperty({ type: String, nullable: true }) changedBy!: string | null;
   @ApiProperty({ type: String, format: 'date-time' }) changedAt!: string;
 }
@@ -162,6 +164,32 @@ export class ResponseVersionDto {
   @ApiProperty({ description: 'عنوان النموذج كما نُشر في هذا الإصدار' }) title!: string;
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty({ type: String, format: 'date-time' }) publishedAt!: string;
+}
+
+/** قيمة إجابة بصيغة عرض داخل سجل التعديلات. */
+export class EditValueDto {
+  @ApiProperty({ enum: ['text', 'number', 'date', 'choice', 'files'] }) kind!: string;
+  @ApiPropertyOptional() value?: string;
+  @ApiPropertyOptional({ type: [String] }) options?: string[];
+  @ApiPropertyOptional({ description: 'الملفات: [{id, name}]' })
+  files?: { id: string; name: string }[];
+}
+
+export class ResponseEditDto {
+  @ApiProperty({ description: 'رقم مراجعة الرد بعد هذا التعديل' }) revision!: number;
+  @ApiProperty() questionId!: string;
+  @ApiProperty({ description: 'عنوان السؤال وقت التعديل' }) questionTitle!: string;
+  @ApiProperty({ type: EditValueDto, nullable: true, description: 'القيمة الأصلية قبل التعديل' })
+  oldValue!: EditValueDto | null;
+  @ApiProperty({ type: EditValueDto, nullable: true }) newValue!: EditValueDto | null;
+  @ApiProperty({ type: String, nullable: true }) editedBy!: string | null;
+  @ApiProperty({ type: String, format: 'date-time' }) editedAt!: string;
+}
+
+export class RejectionDto {
+  @ApiProperty() reason!: string;
+  @ApiProperty({ type: String, nullable: true }) rejectedBy!: string | null;
+  @ApiProperty({ type: String, format: 'date-time' }) rejectedAt!: string;
 }
 
 export class ResponseDetailDto {
@@ -175,13 +203,39 @@ export class ResponseDetailDto {
   @ApiProperty({ type: [AnswerViewDto] }) answers!: AnswerViewDto[];
   @ApiProperty({ type: [StatusChangeDto], description: 'من الأقدم إلى الأحدث' })
   statusHistory!: StatusChangeDto[];
+  @ApiProperty({ description: 'رقم مراجعة تعديلات الإدارة (0 = لم يُعدَّل)' })
+  editRevision!: number;
+  @ApiProperty({ type: [ResponseEditDto], description: 'تعديلات الإدارة من الأقدم إلى الأحدث' })
+  edits!: ResponseEditDto[];
+  @ApiProperty({ description: 'أُرسل إلى Flowmax، فلا يُعدَّل' }) locked!: boolean;
+  @ApiProperty({
+    type: RejectionDto,
+    nullable: true,
+    description: 'سبب الرفض الحالي (حين تكون الحالة مرفوض)',
+  })
+  rejection!: RejectionDto | null;
 }
+
+export const REJECTION_REASON_MIN = 3;
+export const REJECTION_REASON_MAX = 500;
 
 export class UpdateResponseStatusDto {
   @ApiProperty({ enum: RESPONSE_STATUSES })
   @IsIn(RESPONSE_STATUSES, { message: 'الحالة غير معروفة.' })
   @IsDefined({ message: 'الحالة مطلوبة.' })
   status!: ResponseStatus;
+
+  @ApiPropertyOptional({
+    maxLength: REJECTION_REASON_MAX,
+    description: `سبب التغيير؛ إلزامي عند REJECTED (${REJECTION_REASON_MIN}–${REJECTION_REASON_MAX} حرفًا)`,
+  })
+  @IsOptional()
+  @Trim()
+  @MaxLength(REJECTION_REASON_MAX, {
+    message: `سبب الرفض يجب ألا يزيد عن ${REJECTION_REASON_MAX} حرف.`,
+  })
+  @IsString({ message: 'سبب الرفض غير صحيح.' })
+  reason?: string;
 }
 
 export class UpdateStatusResultDto {

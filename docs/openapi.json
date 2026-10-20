@@ -1453,7 +1453,7 @@
     },
     "/api/forms/{id}/responses/{responseId}/status": {
       "patch": {
-        "description": "NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.",
+        "description": "NEW أو IN_REVIEW أو ACCEPTED أو REJECTED. REJECTED يتطلب reason (يُحفظ في سجل الحالات). لا تتغير الإجابات ولا الإصدار. الحالة نفسها ⇒ changed=false دون سجل جديد.",
         "operationId": "ResponsesController_updateStatus",
         "parameters": [
           {
@@ -1510,6 +1510,185 @@
           }
         ],
         "summary": "تغيير حالة الرد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/edit": {
+      "get": {
+        "description": "أسئلة إصدار الرد بإعداداتها وشروط ظهورها (بمعرّفات الإصدار)، والقيم الحالية، ورقم المراجعة revision.",
+        "operationId": "ResponseEditsController_editForm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك صلاحية مراجعة الردود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "بيانات تعديل الرد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/answers": {
+      "patch": {
+        "description": "{revision, answers: [{questionId, value}]} حيث value كإرسال الرد العام أو null للمسح. يُعاد التحقق من الرد كاملًا بقواعد إصداره وشروط الظهور. revision قديم ⇒ 409 RESPONSE_EDIT_CONFLICT مع القيم الحالية؛ الرد المرسل إلى Flowmax ⇒ 409 RESPONSE_LOCKED. كل تغيير يُسجل بالقيمة الأصلية والمعدلة ومن عدّل ومتى.",
+        "operationId": "ResponseEditsController_save",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك صلاحية مراجعة الردود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "تعديل إجابات الرد قبل اعتماده",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/files": {
+      "post": {
+        "description": "جسم الطلب محتوى الملف (application/octet-stream) مع x-file-name. بالتحقق نفسه للرفع العام. لا يُربط بالرد إلا عند حفظ التعديل.",
+        "operationId": "ResponseEditsController_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "questionId",
+            "required": true,
+            "in": "query",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك صلاحية مراجعة الردود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "رفع مرفق لتعديل الرد",
+        "tags": [
+          "responses"
+        ]
+      }
+    },
+    "/api/forms/{id}/responses/{responseId}/rejection-share": {
+      "post": {
+        "description": "للرد المرفوض فقط. يعيد رابط wa.me برقم الجوال الموجود في الرد ورسالة جاهزة (التحية، سبب الرفض، الرقم المرجعي). لا يرسل شيئًا؛ يُسجَّل فتح المشاركة فقط. بلا رقم صالح ⇒ 422 REJECTION_SHARE_NO_PHONE.",
+        "operationId": "ResponseEditsController_rejectionShare",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responseId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "FORBIDDEN: لا يملك صلاحية مراجعة الردود"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "csrf": []
+          }
+        ],
+        "summary": "رابط مشاركة سبب الرفض عبر واتساب",
         "tags": [
           "responses"
         ]
@@ -1684,7 +1863,7 @@
     },
     "/api/forms/{id}/responses/{responseId}/flowmax/approve": {
       "post": {
-        "description": "يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.",
+        "description": "يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا. editRevision (اختياري): رقم مراجعة التعديلات الذي راجعه المستخدم؛ إن تغيّر ⇒ 409 RESPONSE_CHANGED. الرد المرفوض ⇒ 409 RESPONSE_REJECTED.",
         "operationId": "FlowmaxController_approve",
         "parameters": [
           {
@@ -3312,6 +3491,11 @@
               "REJECTED"
             ]
           },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "سبب التغيير (إلزامي عند الرفض)"
+          },
           "changedBy": {
             "type": "string",
             "nullable": true
@@ -3324,8 +3508,116 @@
         "required": [
           "fromStatus",
           "toStatus",
+          "reason",
           "changedBy",
           "changedAt"
+        ]
+      },
+      "EditValueDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "number",
+              "date",
+              "choice",
+              "files"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "description": "الملفات: [{id, name}]",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "ResponseEditDto": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "number",
+            "description": "رقم مراجعة الرد بعد هذا التعديل"
+          },
+          "questionId": {
+            "type": "string"
+          },
+          "questionTitle": {
+            "type": "string",
+            "description": "عنوان السؤال وقت التعديل"
+          },
+          "oldValue": {
+            "nullable": true,
+            "description": "القيمة الأصلية قبل التعديل",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EditValueDto"
+              }
+            ]
+          },
+          "newValue": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EditValueDto"
+              }
+            ]
+          },
+          "editedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "editedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "revision",
+          "questionId",
+          "questionTitle",
+          "oldValue",
+          "newValue",
+          "editedBy",
+          "editedAt"
+        ]
+      },
+      "RejectionDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "rejectedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "rejectedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "rejectedBy",
+          "rejectedAt"
         ]
       },
       "ResponseDetailDto": {
@@ -3372,6 +3664,31 @@
             "items": {
               "$ref": "#/components/schemas/StatusChangeDto"
             }
+          },
+          "editRevision": {
+            "type": "number",
+            "description": "رقم مراجعة تعديلات الإدارة (0 = لم يُعدَّل)"
+          },
+          "edits": {
+            "description": "تعديلات الإدارة من الأقدم إلى الأحدث",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResponseEditDto"
+            }
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "أُرسل إلى Flowmax، فلا يُعدَّل"
+          },
+          "rejection": {
+            "nullable": true,
+            "description": "سبب الرفض الحالي (حين تكون الحالة مرفوض)",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RejectionDto"
+              }
+            ]
           }
         },
         "required": [
@@ -3383,7 +3700,11 @@
           "formTitle",
           "version",
           "answers",
-          "statusHistory"
+          "statusHistory",
+          "editRevision",
+          "edits",
+          "locked",
+          "rejection"
         ]
       },
       "UpdateResponseStatusDto": {
@@ -3397,6 +3718,11 @@
               "ACCEPTED",
               "REJECTED"
             ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "سبب التغيير؛ إلزامي عند REJECTED (3–500 حرفًا)"
           }
         },
         "required": [

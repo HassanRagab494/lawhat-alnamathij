@@ -15,7 +15,7 @@ import {
   type FlowmaxState,
   type FlowmaxSync,
 } from '@/lib/flowmax';
-import { Alert, Badge, Button, Card } from './ui';
+import { Alert, Badge, Button, Card, ConfirmDialog } from './ui';
 
 const POLL_MS = 2000;
 
@@ -84,7 +84,8 @@ function PublishedSummary({ share, reference }: { share: FlowmaxShare; reference
       share.priceSar ? formatPriceSar(share.priceSar) : null,
     ],
     ['الغرف', share.bedrooms != null ? String(share.bedrooms) : null],
-    ['دورات المياه', share.bathrooms != null ? String(share.bathrooms) : null],
+    ['الحمامات', share.bathrooms != null ? String(share.bathrooms) : null],
+    ['المطابخ', share.kitchens != null ? String(share.kitchens) : null],
     ['الرقم في Flowmax', reference],
   ];
   return (
@@ -92,6 +93,11 @@ function PublishedSummary({ share, reference }: { share: FlowmaxShare; reference
       <p dir="auto" className="mb-2 font-bold text-ink">
         {share.title}
       </p>
+      {share.description && (
+        <p dir="auto" className="mb-3 whitespace-pre-line break-words text-sm text-ink">
+          {share.description}
+        </p>
+      )}
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
         {rows
           .filter(([, v]) => v)
@@ -158,6 +164,7 @@ export function FlowmaxPanel({
   const [busy, setBusy] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [error, setError] = useState<{ text: string; items: string[] } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -186,7 +193,11 @@ export function FlowmaxPanel({
     setBusy(true);
     setError(null);
     try {
-      const body = action === 'approve' ? { excludeFileIds: excluded } : {};
+      // يُعتمد ما راجعه المستخدم نفسه: إن عُدّل الرد بعد تحميل اللوحة يرفض الخادم الاعتماد (409)
+      const body =
+        action === 'approve'
+          ? { excludeFileIds: excluded, editRevision: state?.editRevision ?? 0 }
+          : {};
       setState(await api<FlowmaxState>(`${base}/${action}`, { method: 'POST', body }));
       if (action === 'approve') onApproved?.();
     } catch (e) {
@@ -206,10 +217,30 @@ export function FlowmaxPanel({
   const incompatible = precheck?.incompatibleMedia ?? [];
   const unresolved = incompatible.filter((m) => !excluded.includes(m.fileId));
   const problems = precheck?.problems ?? [];
+  const notices = precheck?.notices ?? [];
+  const edited = (state.editRevision ?? 0) > 0;
+
+  if (state.rejected && !sync) {
+    return (
+      <Card className="h-fit p-5">
+        <h2 className="mb-3 text-base font-bold text-velvet-900">Flowmax</h2>
+        <Alert tone="warning">
+          هذا الرد مرفوض، فلا يُرسل إلى Flowmax. غيّر حالته أولًا إن أردت اعتماده.
+        </Alert>
+      </Card>
+    );
+  }
 
   return (
     <Card className="h-fit p-5">
       <h2 className="mb-3 text-base font-bold text-velvet-900">Flowmax</h2>
+      {state.rejected && (
+        <div className="mb-3">
+          <Alert tone="warning">
+            هذا الرد مرفوض؛ لا يُعرض رابطه في Flowmax ولا مشاركته، ولا تُعاد محاولة إرساله.
+          </Alert>
+        </div>
+      )}
       {!sync ? (
         canReview ? (
           <div className="flex flex-col gap-3">
@@ -259,14 +290,40 @@ export function FlowmaxPanel({
                 </ul>
               </fieldset>
             )}
+            {notices.length > 0 && (
+              <Alert tone="info">
+                <ul className="list-disc ps-5">
+                  {notices.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {edited && (
+              <p className="text-xs font-semibold text-amber-900">
+                عُدّلت بيانات هذا الرد؛ راجع «سجل التعديلات» قبل الاعتماد.
+              </p>
+            )}
             <Button
               className="w-full"
-              onClick={() => void act('approve')}
+              onClick={() => (edited ? setConfirmOpen(true) : void act('approve'))}
               loading={busy}
               disabled={problems.length > 0 || unresolved.length > 0}
             >
               اعتماد وإرسال إلى Flowmax
             </Button>
+            <ConfirmDialog
+              open={confirmOpen}
+              title="تأكيد الاعتماد بعد التعديل"
+              description="عُدّلت بيانات هذا الرد بعد إرساله من العميل. سيُرسل إلى Flowmax بالقيم المعدلة كما تظهر الآن، ولا يمكن تعديله بعد الإرسال. هل راجعت التعديلات؟"
+              confirmLabel="اعتماد بالقيم المعدلة"
+              loading={busy}
+              onConfirm={() => {
+                setConfirmOpen(false);
+                void act('approve');
+              }}
+              onClose={() => setConfirmOpen(false)}
+            />
           </div>
         ) : (
           <p className="text-sm text-muted">لم يُعتمد هذا الرد للإرسال إلى Flowmax.</p>
@@ -288,7 +345,7 @@ export function FlowmaxPanel({
           {sync.status === 'FAILED' && (
             <>
               <Alert tone="error">{sync.lastError ?? 'فشل الإرسال.'}</Alert>
-              {canReview && (
+              {canReview && !state.rejected && (
                 <Button variant="secondary" onClick={() => void act('retry')} loading={busy}>
                   إعادة المحاولة
                 </Button>
@@ -324,7 +381,7 @@ export function FlowmaxPanel({
                   <p className="text-xs text-muted">
                     أُرسل العقار ولم يُنشر؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
                   </p>
-                  {canReview && (
+                  {canReview && !state.rejected && (
                     <Button onClick={() => void act('publish')} loading={busy}>
                       {sync.publishState === 'FAILED' ? 'إعادة محاولة النشر' : 'نشر في Flowmax'}
                     </Button>

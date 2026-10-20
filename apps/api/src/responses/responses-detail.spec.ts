@@ -53,8 +53,22 @@ function response(answers: unknown[]) {
         toStatus: 'ACCEPTED',
         changedAt: new Date('2026-10-02T00:00:00.000Z'),
         changedBy: { displayName: 'مراجع' },
+        reason: null,
       },
     ],
+    editRevision: 1,
+    edits: [
+      {
+        revision: 1,
+        questionId: 'text',
+        questionTitle: 'نص',
+        oldValue: { kind: 'text', value: 'قبل' },
+        newValue: { kind: 'text', value: 'بعد' },
+        editedBy: { displayName: 'مراجع' },
+        editedAt: new Date('2026-10-01T12:00:00.000Z'),
+      },
+    ],
+    flowmaxSync: null,
   } as never;
 }
 
@@ -115,10 +129,24 @@ describe('toDetailDto', () => {
       {
         fromStatus: 'NEW',
         toStatus: 'ACCEPTED',
+        reason: null,
         changedBy: 'مراجع',
         changedAt: '2026-10-02T00:00:00.000Z',
       },
     ]);
+    // سجل التعديلات بالقيمة الأصلية والمعدلة ومن عدّل ومتى؛ الرد غير مرسل فلا قفل، وغير مرفوض فلا سبب
+    expect(dto.edits).toEqual([
+      {
+        revision: 1,
+        questionId: 'text',
+        questionTitle: 'نص',
+        oldValue: { kind: 'text', value: 'قبل' },
+        newValue: { kind: 'text', value: 'بعد' },
+        editedBy: 'مراجع',
+        editedAt: '2026-10-01T12:00:00.000Z',
+      },
+    ]);
+    expect(dto).toMatchObject({ editRevision: 1, locked: false, rejection: null });
   });
 
   it('إجابة اختيار بلا خيارات تُعرض فارغة، والنص يبقى نصًا خامًا', () => {

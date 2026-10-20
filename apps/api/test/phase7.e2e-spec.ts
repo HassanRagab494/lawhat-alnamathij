@@ -160,7 +160,6 @@ async function offerAnswers(token: string) {
     { questionId: pq('listing.kind').id, value: po('listing.kind', 'offer') },
     { questionId: pq('offer.category').id, value: po('offer.category', 'villa') },
     { questionId: pq('offer.purpose').id, value: po('offer.purpose', 'sale') },
-    { questionId: pq('offer.title').id, value: 'فيلا للبيع (اختبار)' },
     { questionId: pq('offer.description').id, value: 'بيانات تجريبية — ليست عقارًا حقيقيًا.' },
     { questionId: pq('offer.city').id, value: 'الرياض' },
     { questionId: pq('offer.district').id, value: 'الملقا' },
@@ -334,7 +333,7 @@ describe('النموذج العقاري الموحّد والأسئلة الشر
       field: 'questions.0.showIf.questionIndex',
       message: 'الشرط يجب أن يعتمد على سؤال سابق لهذا السؤال.',
     });
-    const titleIndex = draft.questions.findIndex((q: any) => q.semanticKey === 'offer.title');
+    const titleIndex = draft.questions.findIndex((q: any) => q.semanticKey === 'offer.description');
     const nonChoice = await as(admin)
       .put(
         `/api/forms/${formId}/draft`,
@@ -378,7 +377,7 @@ describe('النموذج العقاري الموحّد والأسئلة الشر
     const tampered = await submit(
       [
         ...requestAnswers(),
-        { questionId: pq('offer.title').id, value: 'تلاعب' },
+        { questionId: pq('offer.description').id, value: 'تلاعب' },
         { questionId: pq('offer.images').id, value: [image] },
       ],
       token,
@@ -386,7 +385,7 @@ describe('النموذج العقاري الموحّد والأسئلة الشر
     const hiddenMsg = 'هذا السؤال غير ظاهر حسب إجاباتك، فلا تُقبل له إجابة.';
     expect(tampered.body.fields).toEqual(
       expect.arrayContaining([
-        { field: `answers.${pq('offer.title').id}`, message: hiddenMsg },
+        { field: `answers.${pq('offer.description').id}`, message: hiddenMsg },
         { field: `answers.${pq('offer.images').id}`, message: hiddenMsg },
       ]),
     );
@@ -406,14 +405,14 @@ describe('النموذج العقاري الموحّد والأسئلة الشر
       ]),
     );
     expect(missing.body.fields.map((f: any) => f.field)).not.toContain(
-      `answers.${pq('offer.title').id}`,
+      `answers.${pq('offer.description').id}`,
     );
 
     const id = await responseId(ok.body.referenceCode);
     const detail = (await as(reviewer).get(`/api/forms/${formId}/responses/${id}`).expect(200))
       .body;
     const view = (s: string) => detail.answers.find((a: any) => a.questionId === pq(s).id);
-    expect(view('offer.title')).toMatchObject({ hidden: true, kind: 'empty' });
+    expect(view('offer.description')).toMatchObject({ hidden: true, kind: 'empty' });
     expect(view('request.city')).toMatchObject({ hidden: false, kind: 'text', value: 'جدة' });
   });
 
@@ -487,7 +486,10 @@ describe('النموذج العقاري الموحّد والأسئلة الشر
       developer_id: 7,
     });
     expect(created[0]!.images).toBe(1);
-    expect(state.sync.share).toMatchObject({ title: 'فيلا للبيع (اختبار)', operation: 'OFFER' });
+    expect(state.sync.share).toMatchObject({
+      title: 'فيلا للبيع في الرياض — الملقا',
+      operation: 'OFFER',
+    });
     expect(await prisma.flowmaxSync.count({ where: { responseId: id } })).toBe(1);
   });
 

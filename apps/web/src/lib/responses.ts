@@ -68,6 +68,8 @@ export interface AnswerView {
 export interface StatusChange {
   fromStatus: ResponseStatus;
   toStatus: ResponseStatus;
+  /** سبب التغيير (إلزامي عند الرفض). */
+  reason?: string | null;
   changedBy: string | null;
   changedAt: string;
 }
@@ -87,7 +89,43 @@ export interface ResponseDetail {
   };
   answers: AnswerView[];
   statusHistory: StatusChange[];
+  /** رقم مراجعة تعديلات الإدارة (0 = لم يُعدَّل). */
+  editRevision: number;
+  edits: ResponseEdit[];
+  /** أُرسل إلى Flowmax، فلا يُعدَّل. */
+  locked: boolean;
+  rejection: { reason: string; rejectedBy: string | null; rejectedAt: string } | null;
 }
+
+/** قيمة إجابة بصيغة العرض في سجل التعديلات. */
+export interface EditValue {
+  kind: 'text' | 'number' | 'date' | 'choice' | 'files';
+  value?: string;
+  options?: string[];
+  files?: { id: string; name: string }[];
+}
+
+export interface ResponseEdit {
+  revision: number;
+  questionId: string;
+  questionTitle: string;
+  oldValue: EditValue | null;
+  newValue: EditValue | null;
+  editedBy: string | null;
+  editedAt: string;
+}
+
+/** نص قيمة في سجل التعديلات. */
+export function editValueText(v: EditValue | null): string {
+  if (!v) return 'بلا إجابة';
+  if (v.kind === 'choice') return v.options?.length ? v.options.join('، ') : 'بلا اختيار';
+  if (v.kind === 'files')
+    return v.files?.length ? v.files.map((f) => f.name).join('، ') : 'بلا ملفات';
+  return v.value ?? '';
+}
+
+export const REJECTION_REASON_MIN = 3;
+export const REJECTION_REASON_MAX = 500;
 
 export interface ResponseFilters {
   search: string;

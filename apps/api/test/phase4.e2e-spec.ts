@@ -534,7 +534,10 @@ describe('المرحلة الرابعة: إدارة الردود', () => {
     expect(same.body.changed).toBe(false);
     const parallel = await Promise.all(
       Array.from({ length: 5 }, () =>
-        as(reviewer).patch(url(formA, `/${r}/status`), { status: 'REJECTED' }),
+        as(reviewer).patch(url(formA, `/${r}/status`), {
+          status: 'REJECTED',
+          reason: 'بيانات غير مكتملة',
+        }),
       ),
     );
     expect(parallel.map((p) => [p.status, p.body.code ?? null])).toEqual(
@@ -550,6 +553,8 @@ describe('المرحلة الرابعة: إدارة الردود', () => {
       ['ACCEPTED', 'REJECTED'],
     ]);
     expect(history.every((x) => x.changedById === reviewer.userId)).toBe(true);
+    // سبب الرفض محفوظ في السجل مع الحالتين؛ التغيير الآخر بلا سبب
+    expect(history.map((x) => x.reason)).toEqual([null, 'بيانات غير مكتملة']);
 
     // الإجابات والإصدار لم يتغيرا
     const answersAfter = await prisma.formAnswer.findMany({

@@ -45,7 +45,6 @@ const OFFER: Record<string, Value> = {
   'offer.category': ['apartment'],
   'offer.purpose': ['sale'],
   'offer.role': ['owner'],
-  'offer.title': 'شقة للبيع في النرجس',
   'offer.description': 'شقة اختبار — ليست عقارًا حقيقيًا.',
   'offer.city': 'الرياض',
   'offer.district': 'النرجس',
@@ -53,6 +52,7 @@ const OFFER: Record<string, Value> = {
   'offer.area': 160,
   'offer.bedrooms': 4,
   'offer.bathrooms': 3,
+  'offer.kitchens': 1,
   'offer.images': { files: [{ kind: 'JPG', name: 'front.jpg' }] },
   'offer.videos': { files: [{ kind: 'MP4', name: 'tour.mp4' }] },
   'contact.name': 'مالك تجريبي',
@@ -77,12 +77,27 @@ const REQUEST: Record<string, Value> = {
 };
 
 describe('ربط النموذج العقاري الموحّد بـ Flowmax', () => {
+  it('القالب الجديد بلا «عنوان الإعلان»، و«عدد الغرف» و«عدد الحمامات» و«عدد المطابخ»', () => {
+    const titles = realEstateTemplateQuestions().map((q) => [q.semanticKey, q.title]);
+    expect(titles.map(([k]) => k)).not.toContain('offer.title');
+    expect(titles.flat()).not.toContain('عنوان الإعلان');
+    expect(Object.fromEntries(titles)).toMatchObject({
+      'offer.bedrooms': 'عدد الغرف',
+      'offer.bathrooms': 'عدد الحمامات',
+      'offer.kitchens': 'عدد المطابخ',
+      'request.bedrooms_min': 'عدد الغرف (الحد الأدنى)',
+      'request.bathrooms_min': 'عدد الحمامات (الحد الأدنى)',
+      'request.kitchens_min': 'عدد المطابخ (الحد الأدنى)',
+    });
+  });
+
   it('العرض يذهب لمسار العروض بقيم Flowmax والسعر بالهللة ورمز التصنيف حسب الغرض', () => {
     const built = buildTemplateRequest(answers(OFFER), ctx);
     expect(built.problems).toEqual([]);
     expect(built.operation).toBe('OFFER');
     expect(built.body).toEqual({
-      title_ar: 'شقة للبيع في النرجس',
+      // بلا سؤال عنوان: العنوان من نوع العقار والغرض والموقع، والوصف هو «وصف العقار» نفسه
+      title_ar: 'شقة للبيع في الرياض — النرجس',
       description_ar: 'شقة اختبار — ليست عقارًا حقيقيًا.',
       type_letter: 'B',
       listing_kind: 'offer',
@@ -99,16 +114,35 @@ describe('ربط النموذج العقاري الموحّد بـ Flowmax', () 
       area_sqm: 160,
       bedrooms_count: 4,
       bathrooms_count: 3,
+      kitchens_count: 1,
       contact_phone: '+966500000097',
       listing_notes: 'الاسم: مالك تجريبي — الصفة: مالك — رد لوحة النماذج ABCD-EFGH-JKMN',
     });
     expect(built.media.map((m) => m.role)).toEqual(['image', 'video']);
     expect(built.share).toMatchObject({
-      title: 'شقة للبيع في النرجس',
+      title: 'شقة للبيع في الرياض — النرجس',
+      description: 'شقة اختبار — ليست عقارًا حقيقيًا.',
       priceSar: '950000',
       purpose: 'بيع',
+      bedrooms: 4,
+      bathrooms: 3,
+      kitchens: 1,
     });
     expect(JSON.stringify(built.share)).not.toMatch(/0500000097|مالك تجريبي/);
+  });
+
+  it('النماذج القديمة التي فيها سؤال «عنوان الإعلان» تبقى تستخدم إجابته', () => {
+    const old: AnswerInput[] = [
+      ...answers(OFFER),
+      {
+        logicalId: 'old-title',
+        title: 'عنوان الإعلان',
+        type: 'SHORT_TEXT',
+        semanticKey: 'offer.title',
+        text: 'شقة مطلة',
+      },
+    ];
+    expect(buildTemplateRequest(old, ctx).body.title_ar).toBe('شقة مطلة');
   });
 
   it('تغيير صياغة السؤال لا يكسر الربط (الهوية الدلالية لا العنوان)', () => {
@@ -138,8 +172,8 @@ describe('ربط النموذج العقاري الموحّد بـ Flowmax', () 
 
   it('إجابات الفرع المخفي لا تُرسل', () => {
     const built = buildTemplateRequest(
-      answers({ ...REQUEST, 'offer.title': 'تلاعب', 'offer.price': 1 }, [
-        'offer.title',
+      answers({ ...REQUEST, 'offer.description': 'تلاعب', 'offer.price': 1 }, [
+        'offer.description',
         'offer.price',
       ]),
       ctx,
@@ -173,6 +207,25 @@ describe('ربط النموذج العقاري الموحّد بـ Flowmax', () 
         'موافقة المرسل ضمن رد لوحة النماذج ABCD-EFGH-JKMN بتاريخ 2026-10-18T09:00:00.000Z',
     });
     expect(built.share?.title).toBe('طلب أرض للاستثمار في جدة');
+  });
+
+  it('عدد المطابخ في الطلب يبقى محفوظًا في الرد ولا يُرسل (غير مدعوم في طلبات Flowmax)', () => {
+    const built = buildTemplateRequest(
+      answers({
+        ...REQUEST,
+        'request.category': ['apartment'],
+        'request.land_use': undefined as never,
+        'request.kitchens_min': 2,
+        'request.bedrooms_min': 3,
+      }),
+      ctx,
+    );
+    expect(built.problems).toEqual([]);
+    expect(JSON.stringify(built.body)).not.toMatch(/kitchen/);
+    expect(built.body.criteria).toMatchObject({ bedrooms_min: 3 });
+    expect(built.notices).toEqual([
+      '«عدد المطابخ (الحد الأدنى)» (2) محفوظ في الرد هنا فقط؛ طلبات Flowmax لا تدعمه.',
+    ]);
   });
 
   it('قيود الطلب: الأرض تتطلب استخدامها، والحد الأدنى لا يتجاوز الأعلى، والموافقة إلزامية', () => {

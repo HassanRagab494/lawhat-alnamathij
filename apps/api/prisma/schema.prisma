@@ -83,6 +83,7 @@ model User {
   createdForms          Form[]                     @relation("FormCreatedBy")
   publishedVersions     FormVersion[]              @relation("VersionPublishedBy")
   responseStatusChanges FormResponseStatusChange[] @relation("ResponseStatusChangedBy")
+  responseEdits         FormResponseEdit[]         @relation("ResponseEditedBy")
   archivedForms         Form[]                     @relation("FormArchivedBy")
   draftUpdates          FormDraft[]                @relation("DraftUpdatedBy")
   flowmaxMappings       FormFlowmaxMapping[]       @relation("FlowmaxMappingUpdatedBy")
@@ -337,6 +338,8 @@ model FormResponse {
   /// SHA-256 لمحتوى الطلب المطبّع (الإصدار والإجابات) لكشف إعادة استخدام المفتاح بمحتوى مختلف.
   requestHash    String         @map("request_hash") @db.Char(64)
   submittedAt    DateTime       @default(now()) @map("submitted_at") @db.DateTime(3)
+  /// يزيد مع كل تعديل إداري للإجابات؛ يمنع كتابة تعديل فوق تعديل أحدث (تعارض متزامن).
+  editRevision   Int            @default(0) @map("edit_revision")
 
   form          Form                       @relation(fields: [formId], references: [id], onDelete: Restrict)
   /// مفتاح مركب: الإصدار يجب أن يخص النموذج نفسه.
@@ -345,6 +348,7 @@ model FormResponse {
   statusChanges FormResponseStatusChange[]
   files         UploadedFile[]
   flowmaxSync   FlowmaxSync?
+  edits         FormResponseEdit[]
 
   @@unique([formId, idempotencyKey])
   @@unique([id, versionId])
@@ -396,6 +400,8 @@ model FormResponseStatusChange {
   responseId  String         @map("response_id") @db.Char(36)
   fromStatus  ResponseStatus @map("from_status")
   toStatus    ResponseStatus @map("to_status")
+  /// سبب التغيير؛ إلزامي عند الرفض.
+  reason      String?        @db.VarChar(500)
   changedById String         @map("changed_by_id") @db.Char(36)
   changedAt   DateTime       @default(now()) @map("changed_at") @db.DateTime(3)
 
@@ -422,12 +428,39 @@ model FillSession {
   uploadCount   Int      @default(0) @map("upload_count")
   createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
   expiresAt     DateTime @map("expires_at") @db.DateTime(3)
+  /// جلسة رفع إدارية لتعديل رد قائم (بلا رمز عام)؛ null لجلسات التعبئة العامة.
+  responseId    String?  @map("response_id") @db.Char(36)
 
   version FormVersion    @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)
   files   UploadedFile[]
 
   @@index([expiresAt])
+  @@index([responseId])
   @@map("fill_sessions")
+}
+
+/// سجل مستقل لتعديلات الإدارة على إجابات رد قبل اعتماده: القيمة قبل التعديل وبعده، ومن عدّل ومتى.
+model FormResponseEdit {
+  id            String   @id @default(uuid(7)) @db.Char(36)
+  responseId    String   @map("response_id") @db.Char(36)
+  /// رقم مراجعة الرد بعد هذا التعديل (تعديلات الحفظ الواحد تحمل الرقم نفسه).
+  revision      Int
+  /// سؤال الإصدار (ليس مفتاحًا أجنبيًا، حتى يبقى السجل مقروءًا كما هو).
+  questionId    String   @map("question_id") @db.Char(36)
+  /// عنوان السؤال وقت التعديل.
+  questionTitle String   @map("question_title") @db.VarChar(300)
+  /// القيمة قبل التعديل وبعده بصيغة عرض (نص، رقم، تاريخ، خيارات، ملفات)؛ null = بلا إجابة.
+  oldValue      Json?    @map("old_value")
+  newValue      Json?    @map("new_value")
+  editedById    String   @map("edited_by_id") @db.Char(36)
+  editedAt      DateTime @default(now()) @map("edited_at") @db.DateTime(3)
+
+  response FormResponse @relation(fields: [responseId], references: [id], onDelete: Restrict)
+  editedBy User         @relation("ResponseEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
+
+  @@index([responseId, editedAt])
+  @@index([editedById])
+  @@map("form_response_edits")
 }
 
 /**
@@ -456,6 +489,9 @@ model UploadedFile {
   responseId    String?   @map("response_id") @db.Char(36)
   answerId      String?   @map("answer_id") @db.Char(36)
   attachedAt    DateTime? @map("attached_at") @db.DateTime(3)
+  /// أُزيل من إجابة الرد بتعديل إداري؛ يبقى الملف والربط محفوظين (لا حذف) ولا يُرسل إلى Flowmax.
+  removedAt     DateTime? @map("removed_at") @db.DateTime(3)
+  removedById   String?   @map("removed_by_id") @db.Char(36)
 
   fillSession FillSession?        @relation(fields: [fillSessionId], references: [id], onDelete: SetNull)
   version     FormVersion         @relation(fields: [versionId, formId], references: [id, formId], onDelete: Restrict)

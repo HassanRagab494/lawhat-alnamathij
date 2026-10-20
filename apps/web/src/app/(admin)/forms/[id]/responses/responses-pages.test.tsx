@@ -156,6 +156,10 @@ const detail = {
     },
   ],
   statusHistory: [],
+  editRevision: 0,
+  edits: [],
+  locked: false,
+  rejection: null,
 };
 
 function routeApi(path: string) {

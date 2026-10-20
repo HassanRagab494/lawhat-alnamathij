@@ -63,13 +63,13 @@ export class FlowmaxController {
   @ApiOperation({
     summary: 'اعتماد الرد وإرساله إلى Flowmax',
     description:
-      'يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا.',
+      'يتحقق من اكتمال الحقول المطلوبة (422 FLOWMAX_INCOMPLETE) ومن توافق المرفقات مع Flowmax (422 FLOWMAX_MEDIA_INCOMPATIBLE ما لم تُستبعد صراحة في excludeFileIds)، ويغيّر الحالة إلى مقبول، ثم يرسل في الخلفية. تكرار الاعتماد لا ينشئ سجلًا ثانيًا. editRevision (اختياري): رقم مراجعة التعديلات الذي راجعه المستخدم؛ إن تغيّر ⇒ 409 RESPONSE_CHANGED. الرد المرفوض ⇒ 409 RESPONSE_REJECTED.',
   })
   approve(
     @CurrentAuth() auth: AuthContext,
     @Param('id', formIdPipe) formId: string,
     @Param('responseId', responseIdPipe) responseId: string,
-    @Body() body: { excludeFileIds?: unknown } | undefined,
+    @Body() body: { excludeFileIds?: unknown; editRevision?: unknown } | undefined,
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
     return this.flowmax.approve(auth, formId, responseId, body ?? {}, meta);

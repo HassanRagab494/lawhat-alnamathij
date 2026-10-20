@@ -97,7 +97,8 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
     if (!label(OFFER_CATEGORIES, category)) fail('offer.category');
     const purpose = choice('offer.purpose');
     if (!label(OFFER_PURPOSES, purpose)) fail('offer.purpose');
-    const title = requiredText('offer.title', 500);
+    // عنوان الإعلان: إجابة سؤال offer.title في النماذج القديمة، وإلا يُبنى من إجابات المرسل نفسها
+    const answeredTitle = optionalText('offer.title', 500);
     const description = requiredText('offer.description', 10000);
     const city = requiredText('offer.city', 100);
     const district = requiredText('offer.district', 100);
@@ -109,6 +110,7 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
     const area = bounded('offer.area', 0, 99_999_999.99, false);
     const bedrooms = bounded('offer.bedrooms', 0, 1000, true);
     const bathrooms = bounded('offer.bathrooms', 0, 1000, true);
+    const kitchens = bounded('offer.kitchens', 0, 1000, true);
     const livingRooms = bounded('offer.living_rooms', 0, 1000, true);
     const units = bounded('offer.units', 0, 100_000, true);
     if (phone && !OFFER_PHONE_RE.test(phone)) fail('contact.phone', 'رقم الجوال غير صالح');
@@ -132,6 +134,10 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
     }
     if (problems.length) return { operation: 'OFFER', body: {}, share: null, media, problems };
 
+    const categoryLabel = label(OFFER_CATEGORIES, category)!;
+    const purposeLabel = label(OFFER_PURPOSES, purpose)!;
+    const title =
+      answeredTitle ?? `${categoryLabel} لل${purposeLabel} في ${city} — ${district}`.slice(0, 500);
     const riyadh = (part: 'day' | 'month') =>
       ctx.approvedAt.toLocaleDateString('en-GB', { timeZone: 'Asia/Riyadh', [part]: '2-digit' });
     const role = label(
@@ -161,6 +167,7 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
       area_sqm: area,
       bedrooms_count: bedrooms,
       bathrooms_count: bathrooms,
+      kitchens_count: kitchens,
       living_rooms_count: livingRooms,
       units_count: units,
       contact_phone: phone,
@@ -175,16 +182,19 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
     };
     dropEmpty(body);
     const share: ShareInfo = {
-      title: title!,
+      title,
+      // الوصف الذي يُرسل إلى Flowmax (description_ar) نفسه
+      description,
       operation: 'OFFER',
-      purpose: label(OFFER_PURPOSES, purpose),
-      category: label(OFFER_CATEGORIES, category),
+      purpose: purposeLabel,
+      category: categoryLabel,
       city,
       district,
       priceSar: String(price),
       areaSqm: area,
       bedrooms,
       bathrooms,
+      kitchens,
     };
     return { operation: 'OFFER', body, share, media, problems };
   }
@@ -240,6 +250,14 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
       request_notes: optionalText('request.notes', 2000),
     };
     dropEmpty(criteria);
+    // المطابخ ليست من معايير طلبات Flowmax؛ تبقى في الرد هنا ولا تُرسل
+    const kitchensMin = bounded('request.kitchens_min', 0, 1000, true);
+    const notices =
+      kitchensMin != null
+        ? [
+            `«${titleOf('request.kitchens_min')}» (${kitchensMin}) محفوظ في الرد هنا فقط؛ طلبات Flowmax لا تدعمه.`,
+          ]
+        : [];
     if (problems.length)
       return { operation: 'REQUEST', body: {}, share: null, media: [], problems };
 
@@ -264,6 +282,7 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
     const share: ShareInfo = {
       // عنوان عرض فقط (لا يُرسل إلى Flowmax)، من إجابات المرسل
       title: `طلب ${categoryLabel} لل${purposeLabel} في ${[city, district].filter(Boolean).join(' — ')}`,
+      description: (criteria.request_notes as string | undefined) ?? null,
       operation: 'REQUEST',
       purpose: purposeLabel,
       category: categoryLabel,
@@ -274,7 +293,7 @@ export function buildTemplateRequest(answers: AnswerInput[], ctx: AutoContext): 
       bedrooms: (criteria.bedrooms_min as number | undefined) ?? null,
       bathrooms: (criteria.bathrooms_min as number | undefined) ?? null,
     };
-    return { operation: 'REQUEST', body, share, media: [], problems };
+    return { operation: 'REQUEST', body, share, media: [], problems, notices };
   }
 }
 

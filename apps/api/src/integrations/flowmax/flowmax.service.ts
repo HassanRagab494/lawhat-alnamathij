@@ -72,6 +72,8 @@ export interface FlowmaxSyncView {
 export interface FlowmaxPrecheck {
   problems: Problem[];
   incompatibleMedia: IncompatibleMedia[];
+  /** ملاحظات لا تمنع الاعتماد. */
+  notices: string[];
 }
 
 export interface FlowmaxStateView {
@@ -80,7 +82,13 @@ export interface FlowmaxStateView {
   sync: FlowmaxSyncView | null;
   /** قبل الاعتماد: الحقول الناقصة والمرفقات غير المتوافقة مع Flowmax. */
   precheck: FlowmaxPrecheck | null;
+  /** الرد مرفوض: لا يُرسل ولا يُعرض رابطه أو مشاركته. */
+  rejected: boolean;
+  /** رقم مراجعة تعديلات الرد؛ يُرسل مع الاعتماد ليُعتمد ما راجعه المستخدم نفسه. */
+  editRevision: number;
 }
+
+const REJECTED_MESSAGE = 'هذا الرد مرفوض، فلا يُرسل إلى Flowmax. غيّر حالته أولًا إن أردت اعتماده.';
 
 /** مفتاح المصدر الثابت للرد؛ Flowmax يفرض تفرده مع هوية حساب التكامل. */
 export const sourceKeyFor = (responseId: string) => `lawha:response:${responseId}`;
@@ -161,6 +169,7 @@ export class FlowmaxService implements OnModuleInit {
         id: true,
         referenceCode: true,
         submittedAt: true,
+        editRevision: true,
         version: {
           select: {
             questions: {
@@ -189,7 +198,9 @@ export class FlowmaxService implements OnModuleInit {
                 option: { select: { label: true, position: true, semanticKey: true } },
               },
             },
+            // المرفقات التي أزالها تعديل إداري تبقى محفوظة ولا تُرسل
             files: {
+              where: { removedAt: null },
               orderBy: { createdAt: 'asc' },
               select: { id: true, originalName: true, kind: true, sizeBytes: true },
             },
@@ -246,28 +257,41 @@ export class FlowmaxService implements OnModuleInit {
           answers.filter((a) => !a.hidden),
           ctx,
         );
-    return { built, incompatible: incompatibleMedia(built.media) };
+    return {
+      built,
+      incompatible: incompatibleMedia(built.media),
+      editRevision: response.editRevision,
+    };
   }
 
   async state(formId: string, responseId: string): Promise<FlowmaxStateView> {
     const response = await this.prisma.formResponse.findFirst({
       where: { id: responseId, formId },
-      select: { id: true, flowmaxSync: true },
+      select: { id: true, status: true, editRevision: true, flowmaxSync: true },
     });
     if (!response) throw Errors.notFound('الرد غير موجود.');
     const mappingEnabled = this.integrationEnabled;
+    const rejected = response.status === 'REJECTED';
     let precheck: FlowmaxPrecheck | null = null;
-    if (!response.flowmaxSync && this.integrationEnabled && mappingEnabled) {
+    if (!response.flowmaxSync && !rejected && this.integrationEnabled && mappingEnabled) {
       const result = await this.build(formId, responseId);
       if (result) {
-        precheck = { problems: result.built.problems, incompatibleMedia: result.incompatible };
+        precheck = {
+          problems: result.built.problems,
+          incompatibleMedia: result.incompatible,
+          notices: result.built.notices ?? [],
+        };
       }
     }
+    const sync = response.flowmaxSync ? this.view(response.flowmaxSync) : null;
     return {
       integrationEnabled: this.integrationEnabled,
       mappingEnabled,
-      sync: response.flowmaxSync ? this.view(response.flowmaxSync) : null,
+      // الرد المرفوض: لا رابط ولا مشاركة حتى لو أُرسل قبل رفضه
+      sync: sync && rejected ? { ...sync, detailUrl: null, share: null } : sync,
       precheck,
+      rejected,
+      editRevision: response.editRevision,
     };
   }
 
@@ -282,7 +306,7 @@ export class FlowmaxService implements OnModuleInit {
     actor: AuthContext,
     formId: string,
     responseId: string,
-    options: { excludeFileIds?: unknown },
+    options: { excludeFileIds?: unknown; editRevision?: unknown },
     meta: RequestMeta,
   ): Promise<FlowmaxStateView> {
     this.assertEnabled();
@@ -303,7 +327,14 @@ export class FlowmaxService implements OnModuleInit {
         'تكامل Flowmax غير مفعّل على هذا الخادم.',
       );
     }
-    const { built, incompatible } = result;
+    const { built, incompatible, editRevision } = result;
+    const changed = () =>
+      Errors.conflict(
+        'RESPONSE_CHANGED',
+        'عُدّلت بيانات هذا الرد بعد أن فتحته، فلم يُعتمد. راجع البيانات المحدّثة ثم أعد الاعتماد.',
+      );
+    if (options.editRevision !== undefined && options.editRevision !== editRevision)
+      throw changed();
     if (built.problems.length || !built.operation || !built.share) {
       throw new AppError(
         HttpStatus.UNPROCESSABLE_ENTITY,
@@ -350,10 +381,14 @@ export class FlowmaxService implements OnModuleInit {
     let created: FlowmaxSync | null = null;
     try {
       created = await runFormTransaction(this.prisma, async (tx) => {
-        const rows = await tx.$queryRaw<{ status: ResponseStatus }[]>`
-          SELECT status FROM form_responses WHERE id = ${responseId} AND form_id = ${formId} FOR UPDATE`;
+        const rows = await tx.$queryRaw<{ status: ResponseStatus; edit_revision: number }[]>`
+          SELECT status, edit_revision FROM form_responses WHERE id = ${responseId} AND form_id = ${formId} FOR UPDATE`;
         const current = rows[0];
         if (!current) throw Errors.notFound('الرد غير موجود.');
+        if (current.status === 'REJECTED')
+          throw Errors.conflict('RESPONSE_REJECTED', REJECTED_MESSAGE);
+        // تعديل حُفظ بين بناء الطلب وهذه المعاملة: لا يُرسل غير ما رآه المراجع
+        if (Number(current.edit_revision) !== editRevision) throw changed();
         const sync = await tx.flowmaxSync.create({
           data: {
             responseId,
@@ -414,6 +449,7 @@ export class FlowmaxService implements OnModuleInit {
   ): Promise<FlowmaxStateView> {
     this.assertEnabled();
     const sync = await this.syncOf(formId, responseId);
+    await this.assertNotRejected(responseId);
     const { count } = await this.prisma.flowmaxSync.updateMany({
       where: { id: sync.id, status: 'FAILED' },
       data: { status: 'PENDING' },
@@ -430,6 +466,14 @@ export class FlowmaxService implements OnModuleInit {
       this.kick(sync.id);
     }
     return this.state(formId, responseId);
+  }
+
+  private async assertNotRejected(responseId: string): Promise<void> {
+    const r = await this.prisma.formResponse.findUnique({
+      where: { id: responseId },
+      select: { status: true },
+    });
+    if (r?.status === 'REJECTED') throw Errors.conflict('RESPONSE_REJECTED', REJECTED_MESSAGE);
   }
 
   private async syncOf(formId: string, responseId: string): Promise<FlowmaxSync> {
@@ -454,6 +498,7 @@ export class FlowmaxService implements OnModuleInit {
   ): Promise<FlowmaxStateView> {
     this.assertEnabled();
     const sync = await this.syncOf(formId, responseId);
+    await this.assertNotRejected(responseId);
     if (sync.operation !== 'OFFER') {
       throw Errors.conflict(
         'FLOWMAX_PUBLISH_NOT_SUPPORTED',
