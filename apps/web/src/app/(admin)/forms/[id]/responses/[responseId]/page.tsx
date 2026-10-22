@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { FilePreview } from '@/components/file-preview';
 import { FlowmaxPanel } from '@/components/flowmax-panel';
@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   LinkButton,
@@ -23,7 +24,7 @@ import { api, ApiError, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatDateTime } from '@/lib/format';
 import { formatBytes } from '@/lib/uploads';
-import { can } from '@/lib/permissions';
+import { can, isAdmin } from '@/lib/permissions';
 import {
   REJECTION_REASON_MAX,
   REJECTION_REASON_MIN,
@@ -159,6 +160,7 @@ function AnswerValue({
 function ResponseDetailView() {
   const { id, responseId } = useParams<{ id: string; responseId: string }>();
   const params = useSearchParams();
+  const router = useRouter();
   const { me, refresh } = useAuth();
   const { data, error, errorText, loading, reload, setData } = useApi<ResponseDetail>(
     `/forms/${id}/responses/${responseId}`,
@@ -174,10 +176,27 @@ function ResponseDetailView() {
   const [shareMessage, setShareMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const canReview = can(me, 'RESPONSES_REVIEW');
   const canDownload = can(me, 'RESPONSES_FILES_DOWNLOAD');
+  const canDelete = isAdmin(me);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // يحافظ على فلاتر القائمة عند الرجوع إليها.
+  // يحافظ على فلاتر القائمة عند الرجوع إليها؛ source=all ⇒ قائمة ردود كل النماذج.
   const list = params.get('list') ?? '';
-  const listHref = `/forms/${id}/responses${/^[\w=&%.\-+]*$/.test(list) && list ? `?${list}` : ''}`;
+  const listBase = params.get('source') === 'all' ? '/responses' : `/forms/${id}/responses`;
+  const listHref = `${listBase}${/^[\w=&%.\-+]*$/.test(list) && list ? `?${list}` : ''}`;
+
+  async function deleteResponse() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api<void>(`/forms/${id}/responses/${responseId}`, { method: 'DELETE' });
+      router.replace(`${listHref}${listHref.includes('?') ? '&' : '?'}deleted=1`);
+    } catch (e) {
+      setDeleteError(errorMessage(e));
+      setDeleting(false);
+    }
+  }
 
   async function saveStatus() {
     if (!data || !nextStatus || nextStatus === data.status) return;
@@ -268,7 +287,37 @@ function ResponseDetailView() {
 
   return (
     <>
-      <PageHeader title={`الرد ${data.referenceCode}`} back={{ href: listHref, label: 'الردود' }} />
+      <PageHeader
+        title={`الرد ${data.referenceCode}`}
+        back={{ href: listHref, label: 'الردود' }}
+        actions={
+          canDelete && (
+            <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+              حذف الرد
+            </Button>
+          )
+        }
+      />
+      {canDelete && (
+        <ConfirmDialog
+          open={deleteOpen}
+          title="حذف الرد"
+          description={
+            data.locked
+              ? `سيختفي الرد ${data.referenceCode} من اللوحة والتصدير. أُرسل هذا الرد إلى Flowmax، والعقار هناك لا يُحذف من هنا. البيانات والمرفقات تبقى محفوظة في قاعدة البيانات.`
+              : `سيختفي الرد ${data.referenceCode} من اللوحة والتصدير. البيانات والمرفقات تبقى محفوظة في قاعدة البيانات ولا تُمسح.`
+          }
+          confirmLabel="حذف الرد"
+          tone="danger"
+          loading={deleting}
+          error={deleteError}
+          onConfirm={() => void deleteResponse()}
+          onClose={() => {
+            setDeleteOpen(false);
+            setDeleteError(null);
+          }}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className="flex min-w-0 flex-col gap-4 lg:order-1">

@@ -95,6 +95,23 @@ export class ResponseListItemDto {
   @ApiProperty() versionNumber!: number;
 }
 
+export class AllResponsesQueryDto extends ResponseListQueryDto {
+  @ApiPropertyOptional({ description: 'تقييد القائمة بنموذج واحد' })
+  @IsOptional()
+  @Matches(/^[0-9a-f-]{36}$/i, { message: 'النموذج غير صحيح.' })
+  formId?: string;
+}
+
+export class AllResponsesListItemDto extends ResponseListItemDto {
+  @ApiProperty() formId!: string;
+  @ApiProperty({ description: 'العنوان الحالي للنموذج' }) formTitle!: string;
+}
+
+export class AllResponsesListDto {
+  @ApiProperty({ type: [AllResponsesListItemDto] }) items!: AllResponsesListItemDto[];
+  @ApiProperty({ type: PageMetaDto }) meta!: PageMetaDto;
+}
+
 export class ResponseListDto {
   @ApiProperty({ type: [ResponseListItemDto] }) items!: ResponseListItemDto[];
   @ApiProperty({ type: PageMetaDto }) meta!: PageMetaDto;

@@ -37,6 +37,17 @@ export interface ResponseList {
   meta: PageMeta;
 }
 
+/** عنصر في قائمة ردود كل النماذج: الرد مع نموذجه. */
+export interface AllResponsesItem extends ResponseListItem {
+  formId: string;
+  formTitle: string;
+}
+
+export interface AllResponsesList {
+  items: AllResponsesItem[];
+  meta: PageMeta;
+}
+
 export type AnswerKind = 'empty' | 'text' | 'number' | 'date' | 'choice' | 'files';
 
 export interface AnswerFile {

@@ -1,8 +1,9 @@
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import FormDetailsPage from './page';
-const { form, apiMock, setData } = vi.hoisted(() => ({
+const { form, apiMock, setData, replaceMock } = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
   form: {
     id: 'f',
     title: 'original',
@@ -28,6 +29,7 @@ const { form, apiMock, setData } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'f' }),
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
 }));
 vi.mock('next/link', () => ({
   default: ({ children, ...props }: React.ComponentProps<'a'>) => <a {...props}>{children}</a>,
@@ -59,6 +61,13 @@ vi.mock('@/lib/api', async (importOriginal) => ({
   api: apiMock,
 }));
 import { ApiError } from '@/lib/api';
+// jsdom لا يدعم <dialog>.showModal
+HTMLDialogElement.prototype.showModal = function () {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close = function () {
+  this.open = false;
+};
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -108,4 +117,16 @@ it('لا زر ولا رابط «ربط Flowmax» في صفحة النموذج (�
   await waitFor(() => expect(title.value).toBe('original'));
   expect(screen.queryByText(/ربط Flowmax/)).toBeNull();
   expect(document.querySelector('a[href$="/flowmax"]')).toBeNull();
+});
+
+it('المدير يحذف النموذج بعد التأكيد ثم يعود إلى قائمة النماذج', async () => {
+  apiMock.mockResolvedValue(undefined);
+  render(<FormDetailsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'حذف النموذج' }));
+  const dialog = screen.getByRole('dialog', { name: 'حذف النموذج' });
+  expect(dialog.textContent).toMatch(/تبقى محفوظة في قاعدة البيانات/);
+  expect(apiMock).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'حذف النموذج' }));
+  await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/forms?deleted=1'));
+  expect(apiMock).toHaveBeenCalledWith('/forms/f', { method: 'DELETE' });
 });

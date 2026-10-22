@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,6 +17,7 @@ import {
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiSecurity,
@@ -23,7 +25,13 @@ import {
 } from '@nestjs/swagger';
 import { Permission } from '@prisma/client';
 import type { AuthContext } from '../auth/auth-context';
-import { CurrentAuth, RequestMeta, RequestMetaData, RequirePermissions } from '../auth/decorators';
+import {
+  AdminOnly,
+  CurrentAuth,
+  RequestMeta,
+  RequestMetaData,
+  RequirePermissions,
+} from '../auth/decorators';
 import { ParseIdPipe } from '../common/id.pipe';
 import { CreateFormDto, FormDto, FormListDto, FormListQueryDto, UpdateFormDto } from './dto';
 import { DraftService } from './draft.service';
@@ -86,6 +94,25 @@ export class FormsController {
     @RequestMetaData() meta: RequestMeta,
   ): Promise<FormDto> {
     return this.forms.update(auth, id, dto, meta);
+  }
+
+  @Delete(':id')
+  @AdminOnly()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'حذف نموذج (حذف ناعم، للمدير فقط)',
+    description:
+      'يخفي النموذج وردوده من الواجهة ويوقف رابطه العام (404). الإصدارات والردود والملفات تبقى محفوظة في القاعدة. 409 RESPONSE_SYNC_IN_PROGRESS إن كان أحد ردوده قيد الإرسال إلى Flowmax.',
+  })
+  @ApiNoContentResponse()
+  @ApiConflictResponse({ description: 'RESPONSE_SYNC_IN_PROGRESS' })
+  remove(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', idPipe) id: string,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<void> {
+    return this.forms.remove(auth, id, meta);
   }
 
   @Post(':id/archive')

@@ -109,7 +109,7 @@ export class UploadsService {
   private async openForm(publicId: string) {
     if (!PUBLIC_ID_RE.test(publicId)) throw Errors.notFound(NOT_FOUND);
     const form = await this.prisma.form.findUnique({
-      where: { publicId },
+      where: { publicId, deletedAt: null },
       select: {
         id: true,
         archivedAt: true,
@@ -241,7 +241,7 @@ export class UploadsService {
   ): Promise<UploadedFileDto> {
     this.assertEnabled();
     const response = await this.prisma.formResponse.findFirst({
-      where: { id: responseId, formId },
+      where: { id: responseId, formId, deletedAt: null, form: { deletedAt: null } },
       select: { versionId: true, flowmaxSync: { select: { id: true } } },
     });
     if (!response) throw Errors.notFound('الرد غير موجود.');

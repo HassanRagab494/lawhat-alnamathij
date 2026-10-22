@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Headers,
   Param,
   Patch,
@@ -13,7 +16,9 @@ import {
 import {
   ApiBody,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -28,9 +33,17 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { THROTTLE, onlyThrottle } from '../common/throttle';
 import type { Response } from 'express';
 import type { AuthContext } from '../auth/auth-context';
-import { CurrentAuth, RequestMeta, RequestMetaData, RequirePermissions } from '../auth/decorators';
+import {
+  AdminOnly,
+  CurrentAuth,
+  RequestMeta,
+  RequestMetaData,
+  RequirePermissions,
+} from '../auth/decorators';
 import { ParseIdPipe } from '../common/id.pipe';
 import {
+  AllResponsesListDto,
+  AllResponsesQueryDto,
   ResponseDetailDto,
   ResponseFilterQueryDto,
   ResponseListDto,
@@ -46,6 +59,29 @@ export { contentDisposition } from './file-response';
 const formIdPipe = new ParseIdPipe('النموذج غير موجود.');
 const responseIdPipe = new ParseIdPipe('الرد غير موجود.');
 const fileIdPipe = new ParseIdPipe('الملف غير موجود.');
+
+/** ردود كل النماذج في قائمة واحدة (رابط «الردود» في الشريط العلوي). */
+@ApiTags('responses')
+@ApiCookieAuth('session')
+@ApiForbiddenResponse({ description: 'FORBIDDEN: لا يملك الصلاحية المطلوبة' })
+@Controller('responses')
+@UseGuards(ThrottlerGuard)
+@onlyThrottle(THROTTLE.responses)
+export class AllResponsesController {
+  constructor(private readonly responses: ResponsesService) {}
+
+  @Get()
+  @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW)
+  @ApiOperation({
+    summary: 'ردود كل النماذج',
+    description:
+      'ترقيم وفلاتر قائمة ردود النموذج نفسها (دون الإصدار)، مع عنوان النموذج لكل رد. formId اختياري لتقييدها بنموذج. لا تظهر ردود النماذج المحذوفة ولا الردود المحذوفة.',
+  })
+  @ApiOkResponse({ type: AllResponsesListDto })
+  list(@Query() query: AllResponsesQueryDto): Promise<AllResponsesListDto> {
+    return this.responses.listAll(query);
+  }
+}
 
 /**
  * إدارة ردود النموذج. كل مسار يتحقق من الصلاحية في الخادم ومن أن الرد يخص النموذج في المسار.
@@ -165,6 +201,27 @@ export class ResponsesController {
       res.set('Content-Length', String(file.size));
     }
     return new StreamableFile(file.stream);
+  }
+
+  @Delete(':responseId')
+  @AdminOnly()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiSecurity('csrf')
+  @ApiOperation({
+    summary: 'حذف رد (حذف ناعم، للمدير فقط)',
+    description:
+      'يخفي الرد من القوائم والتفاصيل والتصدير. الإجابات والملفات والسجلات تبقى محفوظة في القاعدة. 409 RESPONSE_SYNC_IN_PROGRESS أثناء إرساله إلى Flowmax؛ العقار المنشور في Flowmax لا يُحذف.',
+  })
+  @ApiNoContentResponse()
+  @ApiNotFoundResponse({ description: 'النموذج أو الرد غير موجود' })
+  @ApiConflictResponse({ description: 'RESPONSE_SYNC_IN_PROGRESS' })
+  remove(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', formIdPipe) formId: string,
+    @Param('responseId', responseIdPipe) responseId: string,
+    @RequestMetaData() meta: RequestMeta,
+  ): Promise<void> {
+    return this.responses.remove(auth, formId, responseId, meta);
   }
 
   @Patch(':responseId/status')

@@ -69,8 +69,13 @@ describe('فلاتر القائمة', () => {
     expect(normalizeReferenceSearch(undefined)).toBeNull();
   });
 
-  it('يقيّد الشرط دائمًا بالنموذج ويجمع الفلاتر', () => {
-    expect(buildResponseWhere('f1', { sort: 'newest' })).toEqual({ formId: 'f1' });
+  it('يقيّد الشرط دائمًا بالنموذج ويستبعد المحذوف ويجمع الفلاتر', () => {
+    expect(buildResponseWhere('f1', { sort: 'newest' })).toEqual({ formId: 'f1', deletedAt: null });
+    // قائمة كل النماذج: بلا قيد نموذج، والمحذوف مستبعد دائمًا.
+    expect(buildResponseWhere(undefined, { sort: 'newest' })).toEqual({
+      formId: undefined,
+      deletedAt: null,
+    });
     const where = buildResponseWhere(
       'f1',
       { sort: 'oldest', status: 'ACCEPTED', search: 'abcd', from: '2026-10-01' },
@@ -78,6 +83,7 @@ describe('فلاتر القائمة', () => {
     );
     expect(where).toEqual({
       formId: 'f1',
+      deletedAt: null,
       versionId: 'v1',
       status: 'ACCEPTED',
       referenceCode: { startsWith: 'ABCD' },

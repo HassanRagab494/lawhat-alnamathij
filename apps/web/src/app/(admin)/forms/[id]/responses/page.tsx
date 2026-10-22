@@ -56,6 +56,7 @@ function ResponsesList() {
   const [draft, setDraft] = useState<ResponseFilters>(filters);
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deleted] = useState(params.get('deleted') === '1');
 
   // عند تغيّر الرابط (رجوع/تقدم أو تطبيق) تُزامَن حقول الفلاتر معه.
   const paramsKey = params.toString();
@@ -134,6 +135,12 @@ function ResponsesList() {
           )
         }
       />
+
+      {deleted && (
+        <div className="mb-4">
+          <Alert tone="success">تم حذف الرد من اللوحة.</Alert>
+        </div>
+      )}
 
       {exportMessage && (
         <div className="mb-4">

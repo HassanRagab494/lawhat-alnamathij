@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { RequirePermission } from '@/components/guards';
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -34,6 +35,8 @@ function FormsList() {
   const search = params.get('search') ?? '';
   const page = Math.max(1, Number(params.get('page')) || 1);
   const [searchInput, setSearchInput] = useState(search);
+  // رسالة الحذف تُقرأ مرة واحدة ثم تبقى حتى مغادرة الصفحة، فلا تختفي مع تغيير الفلاتر.
+  const [deleted] = useState(params.get('deleted') === '1');
 
   useEffect(() => setSearchInput(search), [search]);
 
@@ -69,6 +72,12 @@ function FormsList() {
         description="كل نموذج جديد يُحفظ كمسودة غير منشورة."
         actions={can(me, 'FORMS_CREATE') && <LinkButton href="/forms/new">إنشاء نموذج</LinkButton>}
       />
+
+      {deleted && (
+        <div className="mb-4">
+          <Alert tone="success">تم حذف النموذج وردوده من اللوحة.</Alert>
+        </div>
+      )}
 
       <Card className="p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

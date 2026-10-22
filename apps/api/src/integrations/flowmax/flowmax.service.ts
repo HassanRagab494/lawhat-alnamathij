@@ -164,7 +164,7 @@ export class FlowmaxService implements OnModuleInit {
 
   private async responseAnswers(formId: string, responseId: string) {
     const r = await this.prisma.formResponse.findFirst({
-      where: { id: responseId, formId },
+      where: { id: responseId, formId, deletedAt: null, form: { deletedAt: null } },
       select: {
         id: true,
         referenceCode: true,
@@ -266,7 +266,7 @@ export class FlowmaxService implements OnModuleInit {
 
   async state(formId: string, responseId: string): Promise<FlowmaxStateView> {
     const response = await this.prisma.formResponse.findFirst({
-      where: { id: responseId, formId },
+      where: { id: responseId, formId, deletedAt: null, form: { deletedAt: null } },
       select: { id: true, status: true, editRevision: true, flowmaxSync: true },
     });
     if (!response) throw Errors.notFound('الرد غير موجود.');

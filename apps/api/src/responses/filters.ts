@@ -46,9 +46,12 @@ export function normalizeReferenceSearch(search?: string): string | null {
   return compact.match(/.{1,4}/g)!.join('-');
 }
 
-/** شرط Prisma للفلاتر؛ النموذج دائمًا جزء من الشرط فلا تظهر ردود نموذج آخر. */
+/**
+ * شرط Prisma للفلاتر؛ النموذج جزء من الشرط فلا تظهر ردود نموذج آخر (undefined فقط لقائمة كل النماذج).
+ * الردود المحذوفة لا تظهر أبدًا.
+ */
 export function buildResponseWhere(
-  formId: string,
+  formId: string | undefined,
   query: ResponseFilterQueryDto,
   versionId?: string,
 ): Prisma.FormResponseWhereInput {
@@ -56,6 +59,7 @@ export function buildResponseWhere(
   const range = riyadhDayRange(query.from, query.to);
   return {
     formId,
+    deletedAt: null,
     ...(versionId && { versionId }),
     ...(query.status && { status: query.status }),
     ...(reference && { referenceCode: { startsWith: reference } }),

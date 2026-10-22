@@ -39,8 +39,8 @@ export class DashboardService {
     const result: DashboardSummaryDto = {};
     if (auth.permissions.includes(Permission.FORMS_VIEW)) {
       const [active, archived] = await this.prisma.$transaction([
-        this.prisma.form.count({ where: { archivedAt: null } }),
-        this.prisma.form.count({ where: { archivedAt: { not: null } } }),
+        this.prisma.form.count({ where: { deletedAt: null, archivedAt: null } }),
+        this.prisma.form.count({ where: { deletedAt: null, archivedAt: { not: null } } }),
       ]);
       result.forms = { active, archived };
     }

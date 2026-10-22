@@ -86,6 +86,7 @@ export class FormsService {
 
   async list(query: FormListQueryDto): Promise<FormListDto> {
     const where: Prisma.FormWhereInput = {
+      deletedAt: null,
       archivedAt: query.status === 'archived' ? { not: null } : null,
       ...(query.search ? { draft: { is: { title: { contains: query.search } } } } : {}),
     };
@@ -103,7 +104,10 @@ export class FormsService {
   }
 
   async get(id: string): Promise<FormDto> {
-    const form = await this.prisma.form.findUnique({ where: { id }, include: formInclude });
+    const form = await this.prisma.form.findUnique({
+      where: { id, deletedAt: null },
+      include: formInclude,
+    });
     if (!form) throw Errors.notFound(FORM_NOT_FOUND);
     return toFormDto(form);
   }
@@ -167,7 +171,10 @@ export class FormsService {
         // Always lock parent before draft; the first consistent read follows lock acquisition.
         // هذا المسار يعدّل العنوان والوصف فقط ويحترم revision نفسه، ولا يلمس أسئلة المسودة.
         await lockForm(tx, id);
-        const current = await tx.form.findUnique({ where: { id }, include: formInclude });
+        const current = await tx.form.findUnique({
+          where: { id, deletedAt: null },
+          include: formInclude,
+        });
         if (!current?.draft) throw Errors.notFound(FORM_NOT_FOUND);
         if (current.archivedAt) {
           throw Errors.conflict('FORM_ARCHIVED', 'لا يمكن تعديل نموذج مؤرشف. استعده أولًا.');
@@ -233,6 +240,51 @@ export class FormsService {
     return this.setArchived(actor, id, false, meta);
   }
 
+  /**
+   * حذف ناعم: يختفي النموذج وردوده من الواجهة ويُغلق الاستقبال فيصبح الرابط العام 404.
+   * لا يُحذف أي صف أو ملف، فيمكن استعادته من القاعدة عند الحاجة.
+   */
+  async remove(actor: AuthContext, id: string, meta: RequestMeta): Promise<void> {
+    await this.formTransaction(async (tx) => {
+      await lockForm(tx, id);
+      const form = await tx.form.findUnique({
+        where: { id, deletedAt: null },
+        select: { draft: { select: { title: true } }, _count: { select: { responses: true } } },
+      });
+      if (!form) throw Errors.notFound(FORM_NOT_FOUND);
+      const sending = await tx.flowmaxSync.count({
+        where: { formId: id, status: { in: ['PENDING', 'SENDING'] } },
+      });
+      if (sending) {
+        throw Errors.conflict(
+          'RESPONSE_SYNC_IN_PROGRESS',
+          'أحد ردود هذا النموذج قيد الإرسال إلى Flowmax الآن. انتظر انتهاء الإرسال ثم احذفه.',
+        );
+      }
+      const now = new Date();
+      await tx.form.update({
+        where: { id },
+        data: {
+          deletedAt: now,
+          deletedById: actor.userId,
+          acceptingResponses: false,
+          updatedAt: now,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: actor.userId,
+          action: 'form.deleted',
+          entityType: 'form',
+          entityId: id,
+          details: { title: form.draft?.title ?? null, responses: form._count.responses },
+          ipAddress: meta.ipAddress,
+        },
+        tx,
+      );
+    });
+  }
+
   private formTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return runFormTransaction(this.prisma, work);
   }
@@ -247,7 +299,7 @@ export class FormsService {
       await lockForm(tx, id);
       const now = new Date();
       const result = await tx.form.updateMany({
-        where: { id, archivedAt: archive ? null : { not: null } },
+        where: { id, deletedAt: null, archivedAt: archive ? null : { not: null } },
         data: archive
           ? // الأرشفة تغلق الاستقبال؛ الاستعادة لا تعيد فتحه تلقائيًا.
             {
@@ -259,7 +311,7 @@ export class FormsService {
           : { archivedAt: null, archivedById: null, updatedAt: now },
       });
       if (result.count === 0) {
-        const exists = await tx.form.count({ where: { id } });
+        const exists = await tx.form.count({ where: { id, deletedAt: null } });
         if (!exists) throw Errors.notFound(FORM_NOT_FOUND);
         throw archive
           ? Errors.conflict('FORM_ALREADY_ARCHIVED', 'النموذج مؤرشف بالفعل.')

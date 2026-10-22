@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FormBasicsFields } from '@/components/form-fields';
 import { FormRenderer } from '@/components/form-renderer';
@@ -42,7 +42,7 @@ import {
 } from '@/lib/draft';
 import { formatDateTime } from '@/lib/format';
 import { setNavigationGuard } from '@/lib/history-guard';
-import { can } from '@/lib/permissions';
+import { can, isAdmin } from '@/lib/permissions';
 import {
   QUESTION_LIMITS,
   QUESTION_TYPES,
@@ -122,6 +122,7 @@ type Tab = 'editor' | 'preview';
 function FormDetails() {
   const { id } = useParams<{ id: string }>();
   const params = useSearchParams();
+  const router = useRouter();
   const { me, refresh } = useAuth();
   const {
     data: loaded,
@@ -151,6 +152,9 @@ function FormDetails() {
   const [archiveDialog, setArchiveDialog] = useState<'archive' | 'restore' | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // تحميل أول نسخة فقط في المحرر؛ التحديثات اللاحقة تمر عبر الحفظ أو معالجة التعارض.
   useEffect(() => {
@@ -192,6 +196,7 @@ function FormDetails() {
   const form = saved;
   const canEdit = can(me, 'FORMS_EDIT') && !form.isArchived;
   const canArchive = can(me, 'FORMS_ARCHIVE');
+  const canDelete = isAdmin(me);
   const errorQuestions = questionsWithErrors(errors);
 
   function setQuestion(index: number, q: EditorQuestion) {
@@ -298,6 +303,18 @@ function FormDetails() {
     }
   }
 
+  async function onDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api<void>(`/forms/${form.id}`, { method: 'DELETE' });
+      router.replace('/forms?deleted=1');
+    } catch (e) {
+      setDeleteError(errorMessage(e));
+      setDeleting(false);
+    }
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'editor', label: canEdit ? 'المحرر' : 'الأسئلة' },
     { key: 'preview', label: 'المعاينة' },
@@ -309,15 +326,21 @@ function FormDetails() {
         title={form.title}
         back={{ href: form.isArchived ? '/forms?status=archived' : '/forms', label: 'النماذج' }}
         actions={
-          canArchive && (
+          (canArchive || canDelete) && (
             <div className="flex flex-wrap gap-2">
-              {form.isArchived ? (
-                <Button variant="secondary" onClick={() => setArchiveDialog('restore')}>
-                  استعادة النموذج
-                </Button>
-              ) : (
-                <Button variant="danger" onClick={() => setArchiveDialog('archive')}>
-                  أرشفة النموذج
+              {canArchive &&
+                (form.isArchived ? (
+                  <Button variant="secondary" onClick={() => setArchiveDialog('restore')}>
+                    استعادة النموذج
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={() => setArchiveDialog('archive')}>
+                    أرشفة النموذج
+                  </Button>
+                ))}
+              {canDelete && (
+                <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+                  حذف النموذج
                 </Button>
               )}
             </div>
@@ -607,6 +630,22 @@ function FormDetails() {
             onClose={() => setDiscardOpen(false)}
           />
         </>
+      )}
+      {canDelete && (
+        <ConfirmDialog
+          open={deleteOpen}
+          title="حذف النموذج"
+          description={`سيختفي «${form.title}» وكل ردوده من اللوحة، ويتوقف رابطه العام فورًا. البيانات والمرفقات تبقى محفوظة في قاعدة البيانات ولا تُمسح.`}
+          confirmLabel="حذف النموذج"
+          tone="danger"
+          loading={deleting}
+          error={deleteError}
+          onConfirm={() => void onDelete()}
+          onClose={() => {
+            setDeleteOpen(false);
+            setDeleteError(null);
+          }}
+        />
       )}
       {canArchive && (
         <ConfirmDialog

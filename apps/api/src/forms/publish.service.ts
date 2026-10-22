@@ -120,7 +120,7 @@ export class PublishService {
         async (tx) => {
           await lockForm(tx, formId);
           const current = await tx.form.findUnique({
-            where: { id: formId },
+            where: { id: formId, deletedAt: null },
             include: {
               draft: {
                 include: {
@@ -257,7 +257,7 @@ export class PublishService {
     await runFormTransaction(this.prisma, async (tx) => {
       await lockForm(tx, formId);
       const form = await tx.form.findUnique({
-        where: { id: formId },
+        where: { id: formId, deletedAt: null },
         select: {
           archivedAt: true,
           acceptingResponses: true,

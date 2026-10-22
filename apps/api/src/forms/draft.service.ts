@@ -138,7 +138,7 @@ export class DraftService {
 
   async getDraft(formId: string): Promise<FormDraftDto> {
     const form = await this.prisma.form.findUnique({
-      where: { id: formId },
+      where: { id: formId, deletedAt: null },
       include: draftInclude,
     });
     if (!form?.draft) throw Errors.notFound(FORM_NOT_FOUND);
@@ -163,7 +163,7 @@ export class DraftService {
         async (tx) => {
           await lockForm(tx, formId);
           const current = await tx.form.findUnique({
-            where: { id: formId },
+            where: { id: formId, deletedAt: null },
             include: draftInclude,
           });
           if (!current?.draft) throw Errors.notFound(FORM_NOT_FOUND);

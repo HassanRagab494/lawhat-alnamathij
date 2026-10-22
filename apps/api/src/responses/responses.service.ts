@@ -21,6 +21,8 @@ import {
   type ResponseDetailDto,
   type ResponseEditDto,
   type ResponseFilterQueryDto,
+  type AllResponsesListDto,
+  type AllResponsesQueryDto,
   type ResponseListDto,
   type ResponseListQueryDto,
   type UpdateStatusResultDto,
@@ -203,7 +205,12 @@ export class ResponsesService {
     stream: Readable;
   }> {
     const file = await this.prisma.uploadedFile.findFirst({
-      where: { id: fileId, formId, responseId, response: { formId } },
+      where: {
+        id: fileId,
+        formId,
+        responseId,
+        response: { formId, deletedAt: null, form: { deletedAt: null } },
+      },
       select: { id: true, storageKey: true, originalName: true, sizeBytes: true, kind: true },
     });
     if (!file) {
@@ -251,7 +258,10 @@ export class ResponsesService {
   }
 
   private async assertForm(formId: string): Promise<void> {
-    const form = await this.prisma.form.findUnique({ where: { id: formId }, select: { id: true } });
+    const form = await this.prisma.form.findUnique({
+      where: { id: formId, deletedAt: null },
+      select: { id: true },
+    });
     if (!form) throw Errors.notFound(FORM_NOT_FOUND);
   }
 
@@ -302,10 +312,97 @@ export class ResponsesService {
     };
   }
 
+  /** ردود كل النماذج غير المحذوفة في قائمة واحدة، بالفلاتر نفسها (دون الإصدار لأنه يخص نموذجًا واحدًا). */
+  async listAll(query: AllResponsesQueryDto): Promise<AllResponsesListDto> {
+    const where: Prisma.FormResponseWhereInput = {
+      ...buildResponseWhere(query.formId, query),
+      form: { deletedAt: null },
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.formResponse.count({ where }),
+      this.prisma.formResponse.findMany({
+        where,
+        orderBy: responseOrder(query.sort),
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        select: {
+          id: true,
+          formId: true,
+          referenceCode: true,
+          status: true,
+          submittedAt: true,
+          version: { select: { versionNumber: true, title: true } },
+          form: { select: { draft: { select: { title: true } } } },
+        },
+      }),
+    ]);
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        formId: r.formId,
+        formTitle: r.form.draft?.title ?? r.version.title,
+        referenceCode: r.referenceCode,
+        status: r.status,
+        submittedAt: r.submittedAt.toISOString(),
+        versionNumber: r.version.versionNumber,
+      })),
+      meta: pageMeta(query.page, query.pageSize, total),
+    };
+  }
+
+  /**
+   * حذف ناعم لرد: يختفي من القوائم والتفاصيل والتصدير، وتبقى إجاباته وملفاته وسجلاته محفوظة.
+   * يُمنع أثناء إرساله إلى Flowmax حتى لا يُقطع إرسال جارٍ؛ العقار المنشور في Flowmax لا يُحذف من هنا.
+   */
+  async remove(
+    actor: AuthContext,
+    formId: string,
+    responseId: string,
+    meta: RequestMeta,
+  ): Promise<void> {
+    const done = await runFormTransaction(this.prisma, async (tx) => {
+      const rows = await tx.$queryRaw<{ form_id: string; reference_code: string }[]>`
+        SELECT form_id, reference_code FROM form_responses
+        WHERE id = ${responseId} AND deleted_at IS NULL FOR UPDATE`;
+      const current = rows[0];
+      if (!current || current.form_id !== formId) return false;
+      const sync = await tx.flowmaxSync.findUnique({
+        where: { responseId },
+        select: { status: true },
+      });
+      if (sync && (sync.status === 'PENDING' || sync.status === 'SENDING')) {
+        throw Errors.conflict(
+          'RESPONSE_SYNC_IN_PROGRESS',
+          'هذا الرد قيد الإرسال إلى Flowmax الآن. انتظر انتهاء الإرسال ثم احذفه.',
+        );
+      }
+      await tx.formResponse.update({
+        where: { id: responseId },
+        data: { deletedAt: new Date(), deletedById: actor.userId },
+      });
+      await this.audit.record(
+        {
+          actorId: actor.userId,
+          action: 'response.deleted',
+          entityType: 'response',
+          entityId: responseId,
+          details: { formId, referenceCode: current.reference_code, sentToFlowmax: Boolean(sync) },
+          ipAddress: meta.ipAddress,
+        },
+        tx,
+      );
+      return true;
+    });
+    if (!done) {
+      await this.assertForm(formId);
+      throw Errors.notFound(RESPONSE_NOT_FOUND);
+    }
+  }
+
   /** تفاصيل رد يخص هذا النموذج فقط؛ رد من نموذج آخر يُعامل كغير موجود. */
   async get(formId: string, responseId: string): Promise<ResponseDetailDto> {
     const r = await this.prisma.formResponse.findFirst({
-      where: { id: responseId, formId },
+      where: { id: responseId, formId, deletedAt: null, form: { deletedAt: null } },
       include: detailInclude,
     });
     if (!r) {
@@ -338,7 +435,8 @@ export class ResponsesService {
     }
     const changed = await runFormTransaction(this.prisma, async (tx) => {
       const rows = await tx.$queryRaw<{ form_id: string; status: ResponseStatus }[]>`
-        SELECT form_id, status FROM form_responses WHERE id = ${responseId} FOR UPDATE`;
+        SELECT form_id, status FROM form_responses
+        WHERE id = ${responseId} AND deleted_at IS NULL FOR UPDATE`;
       const current = rows[0];
       if (!current || current.form_id !== formId) return null;
       if (current.status === status) return false;

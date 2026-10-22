@@ -90,7 +90,7 @@ export class PublicService {
   async getPublicForm(publicId: string): Promise<PublicFormDto> {
     if (!PUBLIC_ID_RE.test(publicId)) throw Errors.notFound(NOT_FOUND);
     const form = await this.prisma.form.findUnique({
-      where: { publicId },
+      where: { publicId, deletedAt: null },
       select: { archivedAt: true, acceptingResponses: true, versions: latestVersionWithQuestions },
     });
     const version = form?.versions[0];
@@ -131,7 +131,10 @@ export class PublicService {
     if (!PUBLIC_ID_RE.test(publicId)) throw Errors.notFound(NOT_FOUND);
     const input = parseSubmitResponse(body);
     const hash = requestHash(input);
-    const form = await this.prisma.form.findUnique({ where: { publicId }, select: { id: true } });
+    const form = await this.prisma.form.findUnique({
+      where: { publicId, deletedAt: null },
+      select: { id: true },
+    });
     if (!form) throw Errors.notFound(NOT_FOUND);
     const formId = form.id;
 

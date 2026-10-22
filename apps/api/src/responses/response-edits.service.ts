@@ -154,7 +154,7 @@ export class ResponseEditsService {
     responseId: string,
   ): Promise<LoadedResponse> {
     const r = await db.formResponse.findFirst({
-      where: { id: responseId, formId },
+      where: { id: responseId, formId, deletedAt: null, form: { deletedAt: null } },
       select: responseSelect,
     });
     if (!r) throw Errors.notFound('الرد غير موجود.');

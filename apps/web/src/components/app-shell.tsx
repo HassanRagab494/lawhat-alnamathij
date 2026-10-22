@@ -15,6 +15,9 @@ interface NavItem {
   match: (path: string) => boolean;
 }
 
+/** صفحات ردود نموذج بعينه تتبع رابط «الردود» لا «النماذج». */
+const RESPONSES_PATH = /^\/forms\/[^/]+\/responses/;
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const pathname = usePathname();
@@ -40,7 +43,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   const items: NavItem[] = [
     { href: '/', label: 'الرئيسية', match: (p) => p === '/' },
     ...(can(me, 'FORMS_VIEW')
-      ? [{ href: '/forms', label: 'النماذج', match: (p: string) => p.startsWith('/forms') }]
+      ? [
+          {
+            href: '/forms',
+            label: 'النماذج',
+            match: (p: string) => p.startsWith('/forms') && !RESPONSES_PATH.test(p),
+          },
+        ]
+      : []),
+    ...(can(me, 'FORMS_VIEW') && can(me, 'RESPONSES_VIEW')
+      ? [
+          {
+            href: '/responses',
+            label: 'الردود',
+            match: (p: string) => p.startsWith('/responses') || RESPONSES_PATH.test(p),
+          },
+        ]
       : []),
     ...(isAdmin(me)
       ? [{ href: '/users', label: 'المستخدمون', match: (p: string) => p.startsWith('/users') }]

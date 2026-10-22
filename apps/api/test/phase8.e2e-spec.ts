@@ -53,6 +53,7 @@ function as(s: Session) {
     post: (url: string, body?: object) => auth(request(server()).post(url)).send(body ?? {}),
     patch: (url: string, body: object) => auth(request(server()).patch(url)).send(body),
     put: (url: string, body: object) => auth(request(server()).put(url)).send(body),
+    del: (url: string) => auth(request(server()).delete(url)),
     upload: (url: string, name: string, data: Buffer) =>
       auth(request(server()).post(url))
         .set('Content-Type', 'application/octet-stream')
@@ -539,5 +540,79 @@ describe('مراجعة الردود: التعديل والرفض', () => {
     await request(server())
       .get(`${base(id)}/edit`)
       .expect(401);
+  });
+});
+
+describe('قائمة كل الردود والحذف الناعم', () => {
+  it('قائمة كل الردود تعرض الرد مع عنوان نموذجه لمن يملك عرض الردود', async () => {
+    const { id } = await submitOffer('0500000081');
+    const res = await as(viewer).get('/api/responses?pageSize=50').expect(200);
+    const item = res.body.items.find((r: any) => r.id === id);
+    expect(item).toMatchObject({ formId, formTitle: 'مراجعة الردود (اختبار)' });
+    expect(JSON.stringify(res.body)).not.toMatch(/0500000081/);
+    const one = await as(viewer).get(`/api/responses?formId=${formId}&pageSize=50`).expect(200);
+    expect(one.body.items.every((r: any) => r.formId === formId)).toBe(true);
+  });
+
+  it('حذف الرد للمدير فقط، يخفيه من القوائم والتفاصيل ويبقي بياناته وملفاته', async () => {
+    const { id, images } = await submitOffer('0500000082');
+    await as(reviewer).del(base(id)).expect(403);
+    await as(admin).del(base(id)).expect(204);
+
+    await as(admin).get(base(id)).expect(404);
+    await as(admin)
+      .get(`${base(id)}/files/${images[0]}`)
+      .expect(404);
+    await as(reviewer)
+      .patch(`${base(id)}/status`, { status: 'IN_REVIEW' })
+      .expect(404);
+    const list = await as(admin).get(`/api/forms/${formId}/responses?pageSize=50`).expect(200);
+    expect(list.body.items.map((r: any) => r.id)).not.toContain(id);
+    const all = await as(admin).get('/api/responses?pageSize=50').expect(200);
+    expect(all.body.items.map((r: any) => r.id)).not.toContain(id);
+    await as(admin).del(base(id)).expect(404);
+
+    const row = await prisma.formResponse.findUniqueOrThrow({ where: { id } });
+    expect(row.deletedAt).not.toBeNull();
+    expect(await prisma.formAnswer.count({ where: { responseId: id } })).toBeGreaterThan(0);
+    expect(await prisma.uploadedFile.count({ where: { responseId: id } })).toBe(2);
+    const logged = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'response.deleted', entityId: id },
+    });
+    expect(JSON.stringify(logged.details)).not.toMatch(/0500000082/);
+  });
+
+  it('حذف النموذج للمدير فقط، يخفيه وردوده ويوقف رابطه العام دون مسح البيانات', async () => {
+    const otherId = (
+      await as(admin)
+        .post('/api/forms', { title: 'نموذج للحذف (اختبار)', template: 'real-estate-unified' })
+        .expect(201)
+    ).body.id as string;
+    const otherDraft = (await as(admin).get(`/api/forms/${otherId}/draft`).expect(200)).body;
+    const otherPublic = (
+      await as(admin)
+        .post(`/api/forms/${otherId}/publish`, {
+          revision: otherDraft.revision,
+          publishKey: randomUUID(),
+          openResponses: true,
+        })
+        .expect(200)
+    ).body.form.publication.publicId as string;
+
+    await as(reviewer).del(`/api/forms/${otherId}`).expect(403);
+    await as(admin).del(`/api/forms/${otherId}`).expect(204);
+
+    await as(admin).get(`/api/forms/${otherId}`).expect(404);
+    await as(admin).get(`/api/forms/${otherId}/draft`).expect(404);
+    await as(admin).get(`/api/forms/${otherId}/responses`).expect(404);
+    await request(server()).get(`/api/public/forms/${otherPublic}`).expect(404);
+    const forms = await as(admin).get('/api/forms?pageSize=50').expect(200);
+    expect(forms.body.items.map((f: any) => f.id)).not.toContain(otherId);
+    await as(admin).del(`/api/forms/${otherId}`).expect(404);
+
+    const row = await prisma.form.findUniqueOrThrow({ where: { id: otherId } });
+    expect(row.deletedAt).not.toBeNull();
+    expect(row.acceptingResponses).toBe(false);
+    expect(await prisma.formVersion.count({ where: { formId: otherId } })).toBe(1);
   });
 });
