@@ -499,19 +499,13 @@ export class FlowmaxService implements OnModuleInit {
     this.assertEnabled();
     const sync = await this.syncOf(formId, responseId);
     await this.assertNotRejected(responseId);
-    if (sync.operation !== 'OFFER') {
-      throw Errors.conflict(
-        'FLOWMAX_PUBLISH_NOT_SUPPORTED',
-        'نشر الطلبات يتم من مراجعة Flowmax؛ استخدم «تحديث الحالة» لمعرفة نشره.',
-      );
-    }
     if (sync.status !== 'SENT') {
       throw Errors.conflict(
         'FLOWMAX_NOT_SENT',
         'لا يمكن النشر قبل اكتمال إرسال البيانات وكل المرفقات.',
       );
     }
-    if (!(await this.publishOffer(sync))) return this.state(formId, responseId);
+    if (!(await this.publishRecord(sync))) return this.state(formId, responseId);
     await this.audit.record({
       actorId: actor.userId,
       action: 'response.flowmax_published',
@@ -527,7 +521,7 @@ export class FlowmaxService implements OnModuleInit {
    * ينشر العرض بقواعد النشر في Flowmax (حجز بشرط الحالة فلا يتكرر الطلب). يعيد false إن كان منشورًا
    * أو قيد النشر. الفشل يُبقي المعرّف ويحفظ السبب للعرض وإعادة المحاولة.
    */
-  private async publishOffer(sync: FlowmaxSync): Promise<boolean> {
+  private async publishRecord(sync: FlowmaxSync): Promise<boolean> {
     const { count } = await this.prisma.flowmaxSync.updateMany({
       where: { id: sync.id, publishState: { in: ['NONE', 'FAILED'] } },
       data: { publishState: 'REQUESTED', publishError: null },
@@ -536,7 +530,7 @@ export class FlowmaxService implements OnModuleInit {
     try {
       const record = await this.client!.json<FlowmaxRecord>(
         'POST',
-        `${API}/offers/${encodeURIComponent(sync.sourceKey)}/publish`,
+        `${API}/${sync.operation === 'OFFER' ? 'offers' : 'demands'}/${encodeURIComponent(sync.sourceKey)}/publish`,
         {},
       );
       await this.save(sync.id, {
@@ -663,8 +657,8 @@ export class FlowmaxService implements OnModuleInit {
         lastError: null,
         leaseUntil: null,
       });
-      // العرض يُنشر بعد نجاح الإنشاء ونقل كل المرفقات. الطلب يُنشر من مراجعة Flowmax.
-      if (sync.operation === 'OFFER') await this.publishOffer(sync);
+      // اعتماد المراجع هنا يتبعه نشر العرض أو الطلب بعد اكتمال الإرسال.
+      await this.publishRecord(sync);
     } catch (error) {
       this.logFailure(id, 'send', error);
       await this.save(id, {

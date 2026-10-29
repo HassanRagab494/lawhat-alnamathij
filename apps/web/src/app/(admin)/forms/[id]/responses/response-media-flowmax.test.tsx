@@ -343,7 +343,7 @@ it('فشل مرفق: يظهر بوضوح مع زر إعادة المحاولة �
   expect(screen.queryByRole('button', { name: 'إعادة المحاولة' })).toBeNull();
 });
 
-it('الطلب: رابط تفاصيل الطلب وتحديث الحالة، دون زر نشر', async () => {
+it('الطلب المرسل سابقًا: يسمح للمراجع بنشره دون إعادة إنشائه', async () => {
   state.flowmax = {
     ...draftSent,
     sync: {
@@ -359,8 +359,19 @@ it('الطلب: رابط تفاصيل الطلب وتحديث الحالة، د�
   expect(
     await screen.findByRole('link', { name: 'https://flowmax.test/properties/demands/PD1001' }),
   ).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'نشر في Flowmax' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'تحديث الحالة من Flowmax' })).toBeTruthy();
+  const publish = screen.getByRole('button', { name: 'نشر في Flowmax' });
+  expect(screen.queryByText('بانتظار مراجعة Flowmax')).toBeNull();
+  apiMock.mockResolvedValueOnce({
+    ...(state.flowmax as FlowmaxState),
+    sync: { ...(state.flowmax as FlowmaxState).sync!, isPublic: true, publishState: 'PUBLISHED' },
+  });
+  fireEvent.click(publish);
+  await waitFor(() =>
+    expect(apiMock).toHaveBeenCalledWith('/forms/form-1/responses/resp-1/flowmax/publish', {
+      method: 'POST',
+      body: {},
+    }),
+  );
 });
 
 it('بعد النشر: مشاركة واتساب ونسخ الرابط دون بيانات المالك', async () => {

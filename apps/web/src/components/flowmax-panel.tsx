@@ -246,7 +246,7 @@ export function FlowmaxPanel({
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted">
               الاعتماد يغيّر حالة الرد إلى «مقبول» ويرسل بياناته ومرفقاته إلى Flowmax، ثم ينشر العرض
-              تلقائيًا بعد نجاح الإرسال. الطلب يبقى بانتظار مراجعة Flowmax قبل نشره.
+              أو الطلب تلقائيًا بعد نجاح الإرسال دون مراجعة إضافية.
             </p>
             {problems.length > 0 && (
               <Alert tone="warning" title="بيانات ناقصة تمنع الاعتماد">
@@ -372,30 +372,18 @@ export function FlowmaxPanel({
           {sync.status === 'SENT' && !sync.isPublic && (
             <>
               {sync.publishError && <Alert tone="error">{sync.publishError}</Alert>}
-              {sync.operation === 'OFFER' && sync.publishState === 'REQUESTED' ? (
+              {sync.publishState === 'REQUESTED' ? (
                 <p role="status" className="text-sm text-muted">
                   جارٍ النشر في Flowmax؛ تتحدث الحالة تلقائيًا.
                 </p>
-              ) : sync.operation === 'OFFER' ? (
+              ) : (
                 <>
                   <p className="text-xs text-muted">
-                    أُرسل العقار ولم يُنشر؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
+                    أُرسل السجل ولم يُنشر؛ لا تظهر المشاركة العامة قبل نشره وتأكيد Flowmax.
                   </p>
                   {canReview && !state.rejected && (
                     <Button onClick={() => void act('publish')} loading={busy}>
                       {sync.publishState === 'FAILED' ? 'إعادة محاولة النشر' : 'نشر في Flowmax'}
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Alert tone="info" title="بانتظار مراجعة Flowmax">
-                    أُرسل الطلب ولم يُنشر بعد. لا يُعتبر منشورًا ولا تظهر المشاركة العامة حتى يؤكد
-                    Flowmax نشره بعد مراجعته.
-                  </Alert>
-                  {canReview && (
-                    <Button variant="secondary" onClick={() => void act('refresh')} loading={busy}>
-                      تحديث الحالة من Flowmax
                     </Button>
                   )}
                 </>

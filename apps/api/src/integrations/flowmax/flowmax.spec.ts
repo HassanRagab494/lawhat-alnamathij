@@ -645,7 +645,23 @@ describe('FlowmaxService.process — إرسال دون تكرار ونتيجة �
     await b.svc.process('sync-6');
     expect(a.row().flowmaxRef).toBe(b.row().flowmaxRef);
     expect(a.row().detailUrl).toBe(`https://flowmax.test/properties/demands/${a.row().flowmaxRef}`);
+    expect(a.row()).toMatchObject({ publishState: 'PUBLISHED', isPublic: true });
     expect(mock.demands.filter((d) => d.sourceKey === 'lawha:response:resp-6')).toHaveLength(1);
+  });
+
+  it('فشل نشر الطلب يحفظ السجل والسبب، وإعادة النشر لا تنشئ طلبًا آخر', async () => {
+    const sync = newSync(10, 'REQUEST');
+    const { svc, row } = service(sync);
+    mock.failNext.push({ match: /\/demands\/.*\/publish$/, mode: 'http500' });
+    await svc.process(sync.id);
+    expect(row()).toMatchObject({ status: 'SENT', publishState: 'FAILED', isPublic: false });
+    expect(row().publishError).toContain('500');
+    const id = row().flowmaxId;
+    await (svc as unknown as { publishRecord(s: FlowmaxSync): Promise<boolean> }).publishRecord(
+      row(),
+    );
+    expect(row()).toMatchObject({ flowmaxId: id, publishState: 'PUBLISHED', isPublic: true });
+    expect(mock.demands.filter((d) => d.sourceKey === sync.sourceKey)).toHaveLength(1);
   });
 
   it('لا يُعاد حجز إرسال مكتمل', async () => {

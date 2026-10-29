@@ -94,7 +94,7 @@ export class FlowmaxController {
   @RequirePermissions(Permission.FORMS_VIEW, Permission.RESPONSES_VIEW, Permission.RESPONSES_REVIEW)
   @ApiSecurity('csrf')
   @ApiOperation({
-    summary: 'نشر العرض في Flowmax',
+    summary: 'نشر العرض أو الطلب المعتمد في Flowmax',
     description:
       'بعد اكتمال الإرسال فقط، وبقواعد النشر في Flowmax. الفشل يحفظ السبب ويمكن إعادة المحاولة. المشاركة العامة لا تظهر إلا بعد تأكيد النشر.',
   })

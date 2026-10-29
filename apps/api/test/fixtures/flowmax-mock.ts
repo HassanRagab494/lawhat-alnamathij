@@ -250,6 +250,15 @@ export async function startMockFlowmax(
         replayed: result.replayed,
       });
     }
+    const demandPublish = new RegExp(`^${base}/demands/([^/]+)/publish$`).exec(url.pathname);
+    if (req.method === 'POST' && demandPublish) {
+      const intake = state.intakes.get(decodeURIComponent(demandPublish[1]!));
+      const demand =
+        intake?.operation === 'demand' && state.demands.find((d) => d.id === intake.targetId);
+      if (!demand) return fail(404, 'not_found');
+      demand.status = 'published';
+      return reply(200, demandRecord(demand, false));
+    }
     const publish = new RegExp(`^${base}/offers/([^/]+)/publish$`).exec(url.pathname);
     if (req.method === 'POST' && publish) {
       const offer = state.intakes.get(decodeURIComponent(publish[1]!));

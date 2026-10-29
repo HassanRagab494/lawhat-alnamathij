@@ -1,0 +1,112 @@
+diff --git a/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php b/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php
+index 2cfb8e2..0645e21 100644
+--- a/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php
++++ b/app/Modules/FormsIntegration/Controllers/FormsIntegrationController.php
+@@ -106,6 +106,16 @@ public function publishOffer(Request $request, string $sourceKey): JsonResponse
+         return response()->json(['success' => true, 'data' => $this->integration->record($offer)]);
+     }
+ 
++    /** POST /api/admin/integrations/forms/demands/{sourceKey}/publish */
++    public function publishDemand(Request $request, string $sourceKey): JsonResponse
++    {
++        $demand = $this->integration->find($request->user(), $sourceKey);
++        abort_if($demand === null, 404);
++        $this->integration->publishDemand($request->user(), $demand);
++
++        return response()->json(['success' => true, 'data' => $this->integration->record($demand)]);
++    }
++
+     /** GET /api/admin/integrations/forms/records/{sourceKey} */
+     public function show(Request $request, string $sourceKey): JsonResponse
+     {
+diff --git a/app/Modules/FormsIntegration/Services/FormsIntegrationService.php b/app/Modules/FormsIntegration/Services/FormsIntegrationService.php
+index 0bed335..e6c0985 100644
+--- a/app/Modules/FormsIntegration/Services/FormsIntegrationService.php
++++ b/app/Modules/FormsIntegration/Services/FormsIntegrationService.php
+@@ -13,6 +13,7 @@
+ use App\Modules\Properties\Services\PropertyFieldDefinitionService;
+ use App\Modules\Properties\Services\PropertyService;
+ use App\Modules\Properties\Services\PropertyVideoService;
++use App\Modules\PropertyDemands\Services\DemandAdminService;
+ use App\Modules\PropertyDemands\Services\PropertyDemandService;
+ use Closure;
+ use Illuminate\Http\UploadedFile;
+@@ -44,6 +45,7 @@ public function __construct(
+         private readonly PropertyFieldDefinitionService $propertyFields,
+         private readonly PropertyCatalogService $catalog,
+         private readonly PropertyDemandService $demands,
++        private readonly DemandAdminService $demandAdmin,
+     ) {}
+ 
+     /**
+@@ -116,6 +118,27 @@ public function publishOffer(IntegrationIntake $offer): Property
+         return $this->properties->publish($property);
+     }
+ 
++    /** Publish only a demand belonging to this integration account, after forms review. */
++    public function publishDemand(User $actor, IntegrationIntake $intake): PropertyDemand
++    {
++        if ($intake->operation !== self::DEMAND || (int) $intake->integration_user_id !== (int) $actor->id) {
++            throw new FlowmaxRuleException('integration_record_not_demand', 'The source record is not a demand owned by this integration account.', 422);
++        }
++
++        return DB::transaction(function () use ($actor, $intake): PropertyDemand {
++            $demand = PropertyDemand::query()->lockForUpdate()->findOrFail($intake->target_id);
++            if (in_array($demand->status, ['published', 'matching'], true)) {
++                return $demand;
++            }
++            $reason = 'Reviewed and approved in forms platform';
++            if (in_array($demand->status, ['submitted', 'under_review'], true)) {
++                $demand = $this->demandAdmin->transition($demand, 'approve', $reason, $actor->id);
++            }
++
++            return $this->demandAdmin->transition($demand, 'publish', $reason, $actor->id);
++        }, self::CLAIM_ATTEMPTS);
++    }
++
+     public function find(User $actor, string $sourceKey): ?IntegrationIntake
+     {
+         return IntegrationIntake::query()
+diff --git a/routes/api/admin.php b/routes/api/admin.php
+index d015566..a0a9ade 100644
+--- a/routes/api/admin.php
++++ b/routes/api/admin.php
+@@ -28,9 +28,9 @@
+ use App\Modules\Properties\Controllers\AdminIngestionRunController;
+ use App\Modules\Properties\Controllers\AdminPropertyAnalyticsController;
+ use App\Modules\Properties\Controllers\AdminPropertyController;
+-use App\Modules\Properties\Controllers\PropertyNearbyPlaceController;
+ use App\Modules\Properties\Controllers\AdminPropertyFieldDefinitionController;
+ use App\Modules\Properties\Controllers\AdminPropertyInquiryController;
++use App\Modules\Properties\Controllers\PropertyNearbyPlaceController;
+ use App\Modules\Properties\Controllers\PropertyWizardController;
+ use App\Modules\PropertyDemands\Controllers\AdminPropertyDemandAnalyticsController;
+ use App\Modules\PropertyDemands\Controllers\AdminPropertyDemandController;
+@@ -67,6 +67,7 @@
+         Route::post('/offers', [FormsIntegrationController::class, 'storeOffer'])->name('admin.integrations.forms.offers.store');
+         Route::post('/demands', [FormsIntegrationController::class, 'storeDemand'])->name('admin.integrations.forms.demands.store');
+         Route::post('/offers/{sourceKey}/media', [FormsIntegrationController::class, 'storeMedia'])->name('admin.integrations.forms.offers.media.store');
++        Route::post('/demands/{sourceKey}/publish', [FormsIntegrationController::class, 'publishDemand'])->name('admin.integrations.forms.demands.publish');
+         Route::post('/offers/{sourceKey}/publish', [FormsIntegrationController::class, 'publishOffer'])->name('admin.integrations.forms.offers.publish');
+         Route::get('/records/{sourceKey}', [FormsIntegrationController::class, 'show'])->name('admin.integrations.forms.records.show');
+     });
+diff --git a/tests/Feature/FormsIntegration/FormsIntegrationTest.php b/tests/Feature/FormsIntegration/FormsIntegrationTest.php
+index c088d63..2471c8d 100644
+--- a/tests/Feature/FormsIntegration/FormsIntegrationTest.php
++++ b/tests/Feature/FormsIntegration/FormsIntegrationTest.php
+@@ -274,3 +274,15 @@ function formsDemandPayload(array $overrides = []): array
+     expect($property->fal_license_number)->toBe($this->developer->fal_license_number)
+         ->and($response->json('data.reference'))->toEndWith($this->developer->fal_license_number);
+ });
++
++it('publishes a reviewed forms demand once and keeps it scoped to its integration account', function (): void {
++    $payload = formsDemandPayload();
++    $first = $this->actingAs($this->integration)->postJson('/api/admin/integrations/forms/demands', $payload)->assertCreated();
++    $url = '/api/admin/integrations/forms/demands/'.$payload['source_key'].'/publish';
++    $this->actingAs(formsIntegrationUser())->postJson($url)->assertNotFound();
++    $this->actingAs($this->integration)->postJson($url)->assertOk()
++        ->assertJsonPath('data.id', $first->json('data.id'))
++        ->assertJsonPath('data.status', 'published')->assertJsonPath('data.is_public', true);
++    $this->actingAs($this->integration)->postJson($url)->assertOk()->assertJsonPath('data.is_public', true);
++    expect(PropertyDemand::query()->count())->toBe(1);
++});
